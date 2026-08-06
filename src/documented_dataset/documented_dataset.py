@@ -20,7 +20,7 @@ class documentedfunction:
         if self.name in cls._ds:
             return cls._ds[self.name]
         val = self.func(cls)#type:ignore
-        cls._ds.assign({self.name: val})
+        cls._ds = cls._ds.assign({self.name: val})
         return val
     def __get__(self, obj, cls:'type[DocumentedDatasetType]') -> xr.DataArray:
         return self(cls)
