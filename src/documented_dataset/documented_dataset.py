@@ -1,36 +1,19 @@
 import inspect
-from collections.abc import Callable, Iterator
+from importlib import import_module
 from importlib.util import module_from_spec, spec_from_file_location
 from io import TextIOWrapper
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 import xarray as xr
 
+from .caching_manager import Caching_Manager
 
-class documentedfunction:
-    def __init__(self,func:Callable[['type[DocumentedDatasetType]'],xr.DataArray]):
-        self.func = func
-        self.name = self.func.__name__
-        self._allowed_to_cache = True
-    def __call__(self,cls:'type[DocumentedDatasetType]') -> xr.DataArray:
-        if not self._allowed_to_cache or cls._no_caching:
-            return self.func(cls)#type:ignore
-        if self.name in cls._ds:
-            return cls._ds[self.name]
-        val = self.func(cls)#type:ignore
-        cls._ds = cls._ds.assign({self.name: val})
-        return val
-    def __get__(self, obj, cls:'type[DocumentedDatasetType]') -> xr.DataArray:
-        return self(cls)
-    @classmethod
-    def prevent_caching(cls):
-        def wrapper(func:Callable[['type[DocumentedDatasetType]'],xr.DataArray]):
-            to_return  = cls(func)
-            to_return._allowed_to_cache = False
-            return to_return
-        return wrapper
+if TYPE_CHECKING:
+    from .registry import Registry
+    from .types import DocumentedDatasetType
+
 
 def load_module(path:Path) -> ModuleType:
     spec = spec_from_file_location(path.stem, path)
@@ -40,14 +23,11 @@ def load_module(path:Path) -> ModuleType:
     spec.loader.exec_module(module)
     return module
 
-class Documented_Dataset_Meta(type):
-    def __getattr__(self, name: str) -> Any:
+
+class Documented_Dataset_Meta(type, Generic['DocumentedDatasetType']):
+    def __getattr__(self:type['DocumentedDatasetType'], name: str) -> Any: # type: ignore
         try:
-            attr =  object.__getattribute__(self,name)
-            if isinstance(attr,documentedfunction):
-                return attr(self)#type:ignore
-            else:
-                return attr
+            return  object.__getattribute__(self,name)
         except AttributeError:
             ...
         _ds:xr.Dataset = object.__getattribute__(self,"_ds")
@@ -55,64 +35,57 @@ class Documented_Dataset_Meta(type):
             return _ds[name]
         elif name in _ds.coords:
             return _ds.coords[name]
+        elif name in self._registry.derived:
+            val = self._registry.derived[name](self)#type:ignore
+            if self._no_caching or not self._registry.derived.should_cache(name):
+                return val
+            self._ds = _ds.assign_attrs(**{name: val})
+            return val
         else:
             raise AttributeError(f"Unknown attribute '{name}'.")
 
-class NoCaching:
-    def __init__(self,cls:'type[DocumentedDatasetType]'):
-        self.dds = cls
-        self.flag = False
-    def __enter__(self):
-        self.flag = True
-        return self
-    def __exit__(self, *exc):
-        self.flag = False
-        return self
-    def __bool__(self):
-        match(self.dds._cache_policy):
-            case "never":
-                return True
-            case "permitted":
-                return self.flag
-            case "always":
-                return False
 
-class Documented_Dataset(metaclass = Documented_Dataset_Meta):
-    _compile_documented:str = "_compile_documented"
-    _calculated:str = "_calculated"
+class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented_Dataset_Meta):
+    _compile_dir:Path
+    _derived_dir:Path
     _ds:xr.Dataset
-    _documented_dimensions:dict[str,xr.DataArray]
-    _documented_data:dict[str,xr.DataArray]
-    _cache_policy:Literal["never","permitted","always"] = "permitted"
-    _path:Path
-    _no_caching:NoCaching
-    def __init_subclass__(cls) -> None:
-        cls._documented_dimensions = {}
-        cls._documented_data = {}
-        cls._path = Path(inspect.getfile(cls)).resolve()
-        cls._no_caching = NoCaching(cls)
-        calc_path = cls._path.with_name(f"{cls._path.stem}{cls._calculated}.py")
-        if not calc_path.exists():
-            return
-        module = load_module(calc_path)
-        for name, val in vars(module).items():
-            if not isinstance(val,documentedfunction):
-                continue
-            setattr(cls,name,val)
-    @classmethod
-    def _load_path(cls,path:Optional[str|Path] = None):
-        if path is None:
-            path = cls._path.parent / cls._compile_documented
+    _registry:'Registry[DocumentedDatasetType]'
+    _no_caching:'Caching_Manager[DocumentedDatasetType]'
+    _cache_policy:Literal['never','always','permitted'] = 'permitted'
+    def __init_subclass__(
+            cls, *, 
+            registry:'Registry[DocumentedDatasetType]|None' = None, 
+            cache_policy:Literal['never','always','permitted'] = "permitted"
+        ) -> None:
+        path = Path(inspect.getfile(cls)).resolve().parent
+        if not hasattr(cls,'_compile_dir'):
+            cls._compile_dir = path / "compile_dir"
+        if not hasattr(cls,'_derived_dir'):
+            cls._compile_dir = path / "derived_dir"
+
+        if registry is None:
+            mod = import_module("documented_dataset.registry")
+            cls._registry = mod.Registry()
         else:
-            path = Path(path)
+            cls._registry = registry
+
+        cls._load_path(cls._derived_dir)
+        cls._cache_policy = cache_policy
+        cls._no_caching = Caching_Manager(cls)#type:ignore
+    
+    @classmethod
+    def _load_path(cls,path:Path):
+        if not path.exists():
+            return
         for path_ in path.glob("*.py"):
             load_module(path_)
 
     @classmethod
     def _build_dataset(cls):
         cls._ds = xr.Dataset()
-        cls._ds = cls._ds.assign_coords(cls._documented_dimensions)
-        cls._ds = cls._ds.assign(cls._documented_data)
+        cls._ds = cls._ds.assign_coords({name:func(cls) for name,func in cls._registry.coordinates.items()})#type:ignore
+        cls._ds = cls._ds.assign({name:func(cls) for name,func in cls._registry.source.items()})#type:ignore
+
     @classmethod
     def _build_documentation(cls,file:TextIOWrapper):
         file.write("import xarray as xr\n")
@@ -151,50 +124,40 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             if "description" in da.attrs:
                 file.write(f"    {da.attrs['description']}")
             file.write("\n    \"\"\"\n")
-        for name, dp in cls._documented_properties():
-            da = dp(cls)
-            file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
-            file.write("    ### Dimensions\n")
-            for dim in da.dims:
-                coord = cls._ds.coords[dim]
-                file.write(f"    - {dim} : {coord.dtype}")
-                if "units" in coord.attrs:
-                    file.write(f" [{coord.attrs['units']}]")
-                file.write("\n")
-            file.write("    ### Units\n")
-            if "units" in da.attrs:
-                file.write(f"    {da.attrs['units']}")
-            file.write("\n    ### Description\n")
-            if "description" in da.attrs:
-                file.write(f"    {da.attrs['description']}")
-            file.write("\n    \"\"\"\n")
+        with cls._no_caching:
+            for name, dp in cls._registry.derived.items():
+                da = dp(cls)#type:ignore
+                file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
+                file.write("    ### Dimensions\n")
+                for dim in da.dims:
+                    coord = cls._ds.coords[dim]
+                    file.write(f"    - {dim} : {coord.dtype}")
+                    if "units" in coord.attrs:
+                        file.write(f" [{coord.attrs['units']}]")
+                    file.write("\n")
+                file.write("    ### Units\n")
+                if "units" in da.attrs:
+                    file.write(f"    {da.attrs['units']}")
+                file.write("\n    ### Description\n")
+                if "description" in da.attrs:
+                    file.write(f"    {da.attrs['description']}")
+                file.write("\n    \"\"\"\n")
     @classmethod
-    def _compile(cls,path:Optional[str|Path] = None):
-        cls._load_path(path)
+    def compile(cls):
+        cls._load_path(cls._compile_dir)
         cls._build_dataset()
         with open(cls._path.with_suffix(".pyi"),'w') as file:
             cls._build_documentation(file)
     @classmethod
-    def _document_data(cls,**kwargs:xr.DataArray):
-        cls._documented_data |= kwargs
-    @classmethod
-    def _document_dimensions(cls,**kwargs:xr.DataArray): 
-        cls._documented_dimensions |= kwargs
-    @classmethod
-    def _documented_properties(cls) -> Iterator[tuple[str,documentedfunction]]:
-        for name, value in vars(cls).items():
-            if isinstance(value,documentedfunction):
-                yield name, value
-    @classmethod
     def _save(cls,path:str|Path):
         cls._ds.to_netcdf(path, engine="h5netcdf")
     @classmethod
-    def _compile_and_save(cls,path:str|Path):
+    def compile_and_save(cls,path:str|Path):
         with cls._no_caching:
-            cls._compile()
+            cls.compile()
         cls._save(path)
     @classmethod
-    def _load(cls,path:str|Path):
+    def load(cls,path:str|Path):
         ds = xr.load_dataset(path)
         cls._ds = ds
     @classmethod
