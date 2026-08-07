@@ -19,7 +19,7 @@ class Single_Provider(Generic[DocumentedDatasetType]):  # noqa: UP046
 class Bulk_Provider(Generic[DocumentedDatasetType]):  # noqa: UP046
     func: DocumentedBulkFunction[DocumentedDatasetType]
     cache_policy:bool|None|dict[str,bool|None]
-    included_variables:tuple[str]
+    included_variables:tuple[str,...]
     IS_BULK:ClassVar[bool] = True
 
 type Provider[T] = Single_Provider[T]|Bulk_Provider[T]# type:ignore
@@ -61,7 +61,7 @@ class RegistryComponent(Generic[DocumentedDatasetType]):  # noqa: UP046
             self(func,cache=cache)
             return func
         return flagged_call
-    def outputs(self,*args,cache:bool|None|dict[str,bool|None] = None) -> Callable[[DocumentedBulkFunction[DocumentedDatasetType]],DocumentedBulkFunction[DocumentedDatasetType]]:
+    def outputs(self,*args:str,cache:bool|None|dict[str,bool|None] = None) -> Callable[[DocumentedBulkFunction[DocumentedDatasetType]],DocumentedBulkFunction[DocumentedDatasetType]]:
         if isinstance(cache,dict):
             args += tuple(cache.keys())
         else:
