@@ -4,7 +4,7 @@ from importlib.util import module_from_spec, spec_from_file_location
 from io import TextIOWrapper
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar, cast
 
 import xarray as xr
 from xarray.core.coordinates import DatasetCoordinates
@@ -29,7 +29,7 @@ class DocumentedDatasetAttributeError(AttributeError): ...
 class DocumentedDatasetLoopingAttributeError(Exception): ...
 class DocumentedDatasetMismatchedGroupAttributes(Exception): ...
 
-class Documented_Dataset_Meta(type, Generic['DocumentedDatasetType']):
+class Documented_Dataset_Meta(type):
     def __getattr__(self:type['DocumentedDatasetType'], name: str) -> Any: # type: ignore
         try:
             return  object.__getattribute__(self,name)
@@ -47,15 +47,15 @@ class Documented_Dataset_Meta(type, Generic['DocumentedDatasetType']):
             raise DocumentedDatasetAttributeError(name=name, obj = self)
 
 
-class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented_Dataset_Meta):
+class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     _autoload_dir:Path
     _ds:xr.Dataset
-    _registry:'Registry[DocumentedDatasetType]'
-    _no_caching:'Caching_Manager[DocumentedDatasetType]'
+    _registry:'Registry[Self]'
+    _no_caching:'Caching_Manager[Self]'
     _cache_policy:Literal['never','always','permitted'] = 'permitted'
     def __init_subclass__(
             cls, *, 
-            registry:'Registry[DocumentedDatasetType]|None' = None, 
+            registry:'Registry[Self]|None' = None, 
             cache_policy:Literal['never','always','permitted'] = "permitted"
         ) -> None:
         path = Path(inspect.getfile(cls)).resolve().parent
@@ -75,10 +75,10 @@ class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented
         if set(ret.keys()) != set(provider.included_variables):
             raise DocumentedDatasetMismatchedGroupAttributes(f"'{provider.func.__name__} encountered a mismatch between the return dictionary keys {set(ret.keys())} and the declared variables {set(provider.included_variables)}.")
     @classmethod
-    def _get_variable_from_registry(cls,name:str,registry_component:'RegistryComponent[DocumentedDatasetType]',ds:xr.Dataset) -> xr.DataArray:
+    def _get_variable_from_registry(cls,name:str,registry_component:'RegistryComponent[Self]',ds:xr.Dataset) -> xr.DataArray:
         provider = registry_component[name]
         if provider.IS_BULK:
-            provider = cast('Bulk_Provider[DocumentedDatasetType]',provider)
+            provider = cast('Bulk_Provider[Self]',provider)
             ret = provider.func(cls)#type:ignore
             cls._validate_bulk_return(ret,provider)#type:ignore
             if not cls._no_caching:
@@ -92,7 +92,7 @@ class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented
                         ds[iname] = val
             return ret[name]
         else:
-            provider = cast('Single_Provider[DocumentedDatasetType]',provider)
+            provider = cast('Single_Provider[Self]',provider)
             val = provider.func(cls)#type:ignore
             if not cls._no_caching and (provider.cache_policy or provider.cache_policy is None and registry_component.default_cache_policy):
                 ds[name] = val
@@ -106,7 +106,7 @@ class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented
             load_module(path_)
 
     @classmethod
-    def _load_registry_component(cls,registry_component:'RegistryComponent[DocumentedDatasetType]',ds:xr.Dataset|DatasetCoordinates) -> dict[str,xr.DataArray]:
+    def _load_registry_component(cls,registry_component:'RegistryComponent[Self]',ds:xr.Dataset|DatasetCoordinates) -> dict[str,xr.DataArray]:
         to_return = {}
         providers = list(registry_component.registered.values())
         last_missing_attrs = None
@@ -117,13 +117,13 @@ class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented
             for provider in providers:
                 try:
                     if provider.IS_BULK:
-                        provider = cast('Bulk_Provider[DocumentedDatasetType]',provider)
+                        provider = cast('Bulk_Provider[Self]',provider)
                         ret = provider.func(cls)#type:ignore
                         cls._validate_bulk_return(ret,provider)#type:ignore
                         for name, val in ret.items():
                             ds[name] = val
                     else:
-                        provider = cast('Single_Provider[DocumentedDatasetType]',provider)
+                        provider = cast('Single_Provider[Self]',provider)
                         val = provider.func(cls)#type:ignore
                         ds[provider.func.__name__] = val
                 except DocumentedDatasetAttributeError as err:
