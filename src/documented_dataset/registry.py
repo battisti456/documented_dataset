@@ -1,31 +1,22 @@
 from collections.abc import Callable
 from typing import Generic, overload
 
-import xarray as xr
-
-from .types import DocumentedDatasetType, DocumentedFunction
+from .types import DocumentedBulkFunction, DocumentedDatasetType, DocumentedFunction
 
 
 class RegistryComponent(Generic[DocumentedDatasetType]):  # noqa: UP046
     def __init__(self):
-        self.registered:dict[str,DocumentedFunction[DocumentedDatasetType]] = {}
+        self.registered:list[DocumentedBulkFunction[DocumentedDatasetType]] = []
     def __call__(
             self,
-            func:DocumentedFunction[DocumentedDatasetType], 
-        ) -> DocumentedFunction[DocumentedDatasetType]:
-        self.registered[func.__name__] = func
+            func:DocumentedBulkFunction[DocumentedDatasetType], 
+        ) -> DocumentedBulkFunction[DocumentedDatasetType]:
+        self.registered.append(func)
         return func
     def __contains__(self, item:str):
         return self.registered.__contains__(item)
-    def __getitem__(self, key:str):
-        return self.registered.__getitem__(key)
-    def items(self):
-        yield from self.registered.items()
-    def register(self,**kwargs:xr.DataArray):
-        for name, val in kwargs.items():
-            self.registered[name] = lambda _, value=val:value
 
-class Cache_Enabled_Registry_Component(RegistryComponent[DocumentedDatasetType]):
+class Cache_Enabled_Registry_Component(Generic[DocumentedDatasetType]):  # noqa: UP046
     def __init__(self, default_cache_policy:bool = False):
         super().__init__()
         self.default_cache_policy = default_cache_policy
@@ -64,10 +55,10 @@ class Cache_Enabled_Registry_Component(RegistryComponent[DocumentedDatasetType])
     def should_cache(self,data_variable_name:str) -> bool:
         cache_policy = self.cache_policy[data_variable_name]
         return cache_policy if cache_policy is not None else self.default_cache_policy
-    def register(self,cache_policy:None|bool = None, **kwargs:xr.DataArray):
-        for name, val in kwargs.items():
-            self.registered[name] = lambda _, value=val:value
-            self.cache_policy[name] = cache_policy
+    def items(self):
+        yield from self.registered.items()
+    def __contains__(self, item):
+        return self.registered.__contains__(item)
 
 class Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
     def __init__(self):

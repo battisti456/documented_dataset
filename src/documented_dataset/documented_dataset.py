@@ -11,7 +11,7 @@ import xarray as xr
 from .caching_manager import Caching_Manager
 
 if TYPE_CHECKING:
-    from .registry import Registry
+    from .registry import Registry, RegistryComponent
     from .types import DocumentedDatasetType
 
 
@@ -22,6 +22,10 @@ def load_module(path:Path) -> ModuleType:
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+class DocumentedDatasetAttributeError(AttributeError): ...
+class DocumentedDatasetLoopingAttributeError(Exception): ...
 
 
 class Documented_Dataset_Meta(type, Generic['DocumentedDatasetType']):
@@ -39,10 +43,10 @@ class Documented_Dataset_Meta(type, Generic['DocumentedDatasetType']):
             val = self._registry.derived[name](self)#type:ignore
             if self._no_caching or not self._registry.derived.should_cache(name):
                 return val
-            self._ds = _ds.assign_attrs(**{name: val})
+            self._ds = _ds.assign_attrs({name: val})
             return val
         else:
-            raise AttributeError(f"Unknown attribute '{name}'.")
+            raise DocumentedDatasetAttributeError(name=name, obj = self)
 
 
 class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented_Dataset_Meta):
@@ -61,7 +65,7 @@ class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented
         if not hasattr(cls,'_compile_dir'):
             cls._compile_dir = path / "compile_dir"
         if not hasattr(cls,'_derived_dir'):
-            cls._compile_dir = path / "derived_dir"
+            cls._derived_dir = path / "derived_dir"
 
         if registry is None:
             mod = import_module("documented_dataset.registry")
@@ -81,10 +85,44 @@ class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented
             load_module(path_)
 
     @classmethod
+    def _load_registry_component(cls,registry_component:'RegistryComponent[DocumentedDatasetType]',is_coord = False) -> dict[str,xr.DataArray]:
+        to_return = {}
+        funcs = registry_component.registered.copy()
+        last_missing_attrs = None
+        missing_attrs = set()
+        while funcs:
+            next_funcs = []
+            missing_attrs = set()
+            for func in funcs:
+                try:
+                    ret = func(cls)#type:ignore
+                    if isinstance(ret,dict):
+                        if is_coord:
+                            cls._ds = cls._ds.assign_coords(ret)
+                        else:
+                            cls._ds = cls._ds.assign(ret)
+                    else:
+                        if is_coord:
+                            cls._ds = cls._ds.assign_coords({func.__name__ : ret})
+                        else:
+                            cls._ds = cls._ds.assign({func.__name__ : ret})
+                except DocumentedDatasetAttributeError as err:
+                    missing_attrs.add(err.name)
+                    next_funcs.append(func)
+            funcs = next_funcs
+            if missing_attrs == last_missing_attrs:
+                break
+            else:
+                last_missing_attrs = missing_attrs
+        if funcs:
+            raise DocumentedDatasetLoopingAttributeError(f"Encountered a looping set of not yet seen attributes while loading {'coordinates' if is_coord else 'attributes'}: {missing_attrs}")
+        return to_return
+
+    @classmethod
     def _build_dataset(cls):
         cls._ds = xr.Dataset()
-        cls._ds = cls._ds.assign_coords({name:func(cls) for name,func in cls._registry.coordinates.items()})#type:ignore
-        cls._ds = cls._ds.assign({name:func(cls) for name,func in cls._registry.source.items()})#type:ignore
+        cls._load_registry_component(cls._registry.coordinates, is_coord=True)
+        cls._load_registry_component(cls._registry.source,is_coord=False)
 
     @classmethod
     def _build_documentation(cls,file:TextIOWrapper):
