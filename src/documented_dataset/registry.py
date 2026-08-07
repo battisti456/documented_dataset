@@ -1,41 +1,45 @@
 from collections.abc import Callable
-from typing import Generic, overload
+from dataclasses import dataclass
+from typing import ClassVar, Generic, overload
 
 from .types import (
-    AttributeName,
     DocumentedBulkFunction,
     DocumentedDatasetType,
     DocumentedFunction,
 )
 
 
-class RegistryComponent(Generic[DocumentedDatasetType]):  # noqa: UP046
-    def __init__(self):
-        self.registered:list[DocumentedBulkFunction[DocumentedDatasetType]] = []
-    def __call__(
-            self,
-            func:DocumentedBulkFunction[DocumentedDatasetType], 
-        ) -> DocumentedBulkFunction[DocumentedDatasetType]:
-        self.registered.append(func)
-        return func
-    def __contains__(self, item:AttributeName):
-        return self.registered.__contains__(item)
+@dataclass
+class Single_Provider(Generic[DocumentedDatasetType]):  # noqa: UP046
+    func: DocumentedFunction[DocumentedDatasetType]
+    cache_policy:bool|None
+    IS_BULK:ClassVar[bool] = False
 
-class Cache_Enabled_Registry_Component(Generic[DocumentedDatasetType]):  # noqa: UP046
+@dataclass
+class Bulk_Provider(Generic[DocumentedDatasetType]):  # noqa: UP046
+    func: DocumentedBulkFunction[DocumentedDatasetType]
+    cache_policy:bool|None|dict[str,bool|None]
+    included_variables:tuple[str]
+    IS_BULK:ClassVar[bool] = True
+
+type Provider[T] = Single_Provider[T]|Bulk_Provider[T]# type:ignore
+
+class RegistryComponent(Generic[DocumentedDatasetType]):  # noqa: UP046
     def __init__(self, default_cache_policy:bool = False):
         super().__init__()
         self.default_cache_policy = default_cache_policy
-        self.registered:dict[AttributeName,DocumentedFunction[DocumentedDatasetType]] = {}
-        self.cache_policy:dict[AttributeName,bool|None] = {}
+        self.registered:dict[str,Provider[DocumentedDatasetType]] = {}
     @overload
     def __call__(
         self,
-        func:DocumentedFunction[DocumentedDatasetType], 
+        func:DocumentedFunction[DocumentedDatasetType],
+        *,
         cache:bool|None
     )-> DocumentedFunction[DocumentedDatasetType]: ...
     @overload
     def __call__(self,
         func:None, 
+        *,
         cache:bool|None
     ) -> Callable[
         [DocumentedFunction[DocumentedDatasetType]],
@@ -43,31 +47,41 @@ class Cache_Enabled_Registry_Component(Generic[DocumentedDatasetType]):  # noqa:
     ]: ...
     def __call__(#type:ignore
             self,
-            func:DocumentedFunction[DocumentedDatasetType]|None = None, 
+            func:DocumentedFunction[DocumentedDatasetType]|None = None,
+            *,
             cache:bool|None = None
         ) -> DocumentedFunction[DocumentedDatasetType]|Callable[
             [DocumentedFunction[DocumentedDatasetType]],
             DocumentedFunction[DocumentedDatasetType]
         ]:
         if func is not None:
-            self.registered[func.__name__] = func
-            self.cache_policy[func.__name__] = cache
+            self.registered[func.__name__] = Single_Provider(func,cache)
             return func
         def flagged_call(func:DocumentedFunction[DocumentedDatasetType]) -> DocumentedFunction[DocumentedDatasetType]:
-            self(func,cache)
+            self(func,cache=cache)
             return func
         return flagged_call
-    def should_cache(self,data_variable_name:AttributeName) -> bool:
-        cache_policy = self.cache_policy[data_variable_name]
-        return cache_policy if cache_policy is not None else self.default_cache_policy
+    def outputs(self,*args,cache:bool|None|dict[str,bool|None] = None) -> Callable[[DocumentedBulkFunction[DocumentedDatasetType]],DocumentedBulkFunction[DocumentedDatasetType]]:
+        if isinstance(cache,dict):
+            args += tuple(cache.keys())
+        else:
+            ...
+        def bulk_call(func:DocumentedBulkFunction[DocumentedDatasetType]) -> DocumentedBulkFunction[DocumentedDatasetType]:
+            for name in args:
+                self.registered[name] = Bulk_Provider(func,cache,args)
+            return func
+        return bulk_call
     def items(self):
         yield from self.registered.items()
     def __contains__(self, item):
         return self.registered.__contains__(item)
+    def __getitem__(self, key):
+        return self.registered.__getitem__(key)
+
 
 class Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
     def __init__(self):
         self.coordinates:RegistryComponent[DocumentedDatasetType] = RegistryComponent()
         self.source:RegistryComponent[DocumentedDatasetType] = RegistryComponent()
-        self.derived:Cache_Enabled_Registry_Component[DocumentedDatasetType] = Cache_Enabled_Registry_Component(default_cache_policy=False)
+        self.derived:RegistryComponent[DocumentedDatasetType] = RegistryComponent(default_cache_policy=False)
 

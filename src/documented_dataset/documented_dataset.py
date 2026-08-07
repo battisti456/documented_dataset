@@ -4,14 +4,15 @@ from importlib.util import module_from_spec, spec_from_file_location
 from io import TextIOWrapper
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 import xarray as xr
+from xarray.core.coordinates import DatasetCoordinates
 
 from .caching_manager import Caching_Manager
 
 if TYPE_CHECKING:
-    from .registry import Registry, RegistryComponent
+    from .registry import Bulk_Provider, Registry, RegistryComponent, Single_Provider
     from .types import DocumentedDatasetType
 
 
@@ -26,7 +27,7 @@ def load_module(path:Path) -> ModuleType:
 
 class DocumentedDatasetAttributeError(AttributeError): ...
 class DocumentedDatasetLoopingAttributeError(Exception): ...
-
+class DocumentedDatasetMismatchedGroupAttributes(Exception): ...
 
 class Documented_Dataset_Meta(type, Generic['DocumentedDatasetType']):
     def __getattr__(self:type['DocumentedDatasetType'], name: str) -> Any: # type: ignore
@@ -40,18 +41,14 @@ class Documented_Dataset_Meta(type, Generic['DocumentedDatasetType']):
         elif name in _ds.coords:
             return _ds.coords[name]
         elif name in self._registry.derived:
-            val = self._registry.derived[name](self)#type:ignore
-            if self._no_caching or not self._registry.derived.should_cache(name):
-                return val
-            self._ds = _ds.assign_attrs({name: val})
+            val = self._get_variable_from_registry(name,self._registry.derived,self._ds)
             return val
         else:
             raise DocumentedDatasetAttributeError(name=name, obj = self)
 
 
 class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented_Dataset_Meta):
-    _compile_dir:Path
-    _derived_dir:Path
+    _autoload_dir:Path
     _ds:xr.Dataset
     _registry:'Registry[DocumentedDatasetType]'
     _no_caching:'Caching_Manager[DocumentedDatasetType]'
@@ -62,21 +59,45 @@ class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented
             cache_policy:Literal['never','always','permitted'] = "permitted"
         ) -> None:
         path = Path(inspect.getfile(cls)).resolve().parent
-        if not hasattr(cls,'_compile_dir'):
-            cls._compile_dir = path / "compile_dir"
-        if not hasattr(cls,'_derived_dir'):
-            cls._derived_dir = path / "derived_dir"
-
+        if not hasattr(cls,'_autoload_dir'):
+            cls._autoload_dir = path / "autoload"
         if registry is None:
             mod = import_module("documented_dataset.registry")
             cls._registry = mod.Registry()
         else:
             cls._registry = registry
-
-        cls._load_path(cls._derived_dir)
+        if cls._autoload_dir.exists():
+            cls._load_path(cls._autoload_dir)
         cls._cache_policy = cache_policy
         cls._no_caching = Caching_Manager(cls)#type:ignore
-    
+    @staticmethod
+    def _validate_bulk_return(ret:dict[str,xr.DataArray],provider:'Bulk_Provider'):
+        if set(ret.keys()) != set(provider.included_variables):
+            raise DocumentedDatasetMismatchedGroupAttributes(f"'{provider.func.__name__} encountered a mismatch between the return dictionary keys {set(ret.keys())} and the declared variables {set(provider.included_variables)}.")
+    @classmethod
+    def _get_variable_from_registry(cls,name:str,registry_component:'RegistryComponent[DocumentedDatasetType]',ds:xr.Dataset) -> xr.DataArray:
+        provider = registry_component[name]
+        if provider.IS_BULK:
+            provider = cast('Bulk_Provider[DocumentedDatasetType]',provider)
+            ret = provider.func(cls)#type:ignore
+            cls._validate_bulk_return(ret,provider)#type:ignore
+            if not cls._no_caching:
+                if isinstance(provider.cache_policy,dict):
+                    for iname, val in ret.items():
+                        cache_policy = provider.cache_policy.get(iname)
+                        if cache_policy or (cache_policy is None and registry_component.default_cache_policy):
+                            ds[iname] = val
+                if provider.cache_policy or (provider.cache_policy is None and registry_component.default_cache_policy):
+                    for iname, val in ret.items():
+                        ds[iname] = val
+            return ret[name]
+        else:
+            provider = cast('Single_Provider[DocumentedDatasetType]',provider)
+            val = provider.func(cls)#type:ignore
+            if not cls._no_caching and (provider.cache_policy or provider.cache_policy is None and registry_component.default_cache_policy):
+                ds[name] = val
+            return val
+
     @classmethod
     def _load_path(cls,path:Path):
         if not path.exists():
@@ -85,44 +106,43 @@ class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented
             load_module(path_)
 
     @classmethod
-    def _load_registry_component(cls,registry_component:'RegistryComponent[DocumentedDatasetType]',is_coord = False) -> dict[str,xr.DataArray]:
+    def _load_registry_component(cls,registry_component:'RegistryComponent[DocumentedDatasetType]',ds:xr.Dataset|DatasetCoordinates) -> dict[str,xr.DataArray]:
         to_return = {}
-        funcs = registry_component.registered.copy()
+        providers = list(registry_component.registered.values())
         last_missing_attrs = None
         missing_attrs = set()
-        while funcs:
-            next_funcs = []
+        while providers:
+            next_providers = []
             missing_attrs = set()
-            for func in funcs:
+            for provider in providers:
                 try:
-                    ret = func(cls)#type:ignore
-                    if isinstance(ret,dict):
-                        if is_coord:
-                            cls._ds = cls._ds.assign_coords(ret)
-                        else:
-                            cls._ds = cls._ds.assign(ret)
+                    if provider.IS_BULK:
+                        provider = cast('Bulk_Provider[DocumentedDatasetType]',provider)
+                        ret = provider.func(cls)#type:ignore
+                        cls._validate_bulk_return(ret,provider)#type:ignore
+                        for name, val in ret.items():
+                            ds[name] = val
                     else:
-                        if is_coord:
-                            cls._ds = cls._ds.assign_coords({func.__name__ : ret})
-                        else:
-                            cls._ds = cls._ds.assign({func.__name__ : ret})
+                        provider = cast('Single_Provider[DocumentedDatasetType]',provider)
+                        val = provider.func(cls)#type:ignore
+                        ds[provider.func.__name__] = val
                 except DocumentedDatasetAttributeError as err:
                     missing_attrs.add(err.name)
-                    next_funcs.append(func)
-            funcs = next_funcs
+                    next_providers.append(provider)
+            providers = next_providers
             if missing_attrs == last_missing_attrs:
                 break
             else:
                 last_missing_attrs = missing_attrs
-        if funcs:
-            raise DocumentedDatasetLoopingAttributeError(f"Encountered a looping set of not yet seen attributes while loading {'coordinates' if is_coord else 'attributes'}: {missing_attrs}")
+        if providers:
+            raise DocumentedDatasetLoopingAttributeError(f"Encountered a looping set of not yet seen attributes while loading: {missing_attrs}")
         return to_return
 
     @classmethod
     def _build_dataset(cls):
         cls._ds = xr.Dataset()
-        cls._load_registry_component(cls._registry.coordinates, is_coord=True)
-        cls._load_registry_component(cls._registry.source,is_coord=False)
+        cls._load_registry_component(cls._registry.coordinates,cls._ds.coords)
+        cls._load_registry_component(cls._registry.source,cls._ds)
 
     @classmethod
     def _build_documentation(cls,file:TextIOWrapper):
@@ -182,7 +202,6 @@ class Documented_Dataset(Generic['DocumentedDatasetType'],metaclass = Documented
                 file.write("\n    \"\"\"\n")
     @classmethod
     def compile(cls):
-        cls._load_path(cls._compile_dir)
         cls._build_dataset()
         with open(cls._path.with_suffix(".pyi"),'w') as file:
             cls._build_documentation(file)
