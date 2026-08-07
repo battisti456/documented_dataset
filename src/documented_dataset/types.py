@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from enum import StrEnum
 from typing import TYPE_CHECKING, TypeVar
 
 import xarray as xr
@@ -9,3 +10,4 @@ if TYPE_CHECKING:
 DocumentedDatasetType = TypeVar("DocumentedDatasetType", bound='Documented_Dataset')
 DocumentedBulkFunction = Callable[[type[DocumentedDatasetType]],xr.DataArray|dict[str,xr.DataArray]]
 DocumentedFunction = Callable[[type[DocumentedDatasetType]],xr.DataArray]
+type AttributeName = str|StrEnum

@@ -1,7 +1,12 @@
 from collections.abc import Callable
 from typing import Generic, overload
 
-from .types import DocumentedBulkFunction, DocumentedDatasetType, DocumentedFunction
+from .types import (
+    AttributeName,
+    DocumentedBulkFunction,
+    DocumentedDatasetType,
+    DocumentedFunction,
+)
 
 
 class RegistryComponent(Generic[DocumentedDatasetType]):  # noqa: UP046
@@ -13,15 +18,15 @@ class RegistryComponent(Generic[DocumentedDatasetType]):  # noqa: UP046
         ) -> DocumentedBulkFunction[DocumentedDatasetType]:
         self.registered.append(func)
         return func
-    def __contains__(self, item:str):
+    def __contains__(self, item:AttributeName):
         return self.registered.__contains__(item)
 
 class Cache_Enabled_Registry_Component(Generic[DocumentedDatasetType]):  # noqa: UP046
     def __init__(self, default_cache_policy:bool = False):
         super().__init__()
         self.default_cache_policy = default_cache_policy
-        self.registered:dict[str,DocumentedFunction[DocumentedDatasetType]] = {}
-        self.cache_policy:dict[str,bool|None] = {}
+        self.registered:dict[AttributeName,DocumentedFunction[DocumentedDatasetType]] = {}
+        self.cache_policy:dict[AttributeName,bool|None] = {}
     @overload
     def __call__(
         self,
@@ -52,7 +57,7 @@ class Cache_Enabled_Registry_Component(Generic[DocumentedDatasetType]):  # noqa:
             self(func,cache)
             return func
         return flagged_call
-    def should_cache(self,data_variable_name:str) -> bool:
+    def should_cache(self,data_variable_name:AttributeName) -> bool:
         cache_policy = self.cache_policy[data_variable_name]
         return cache_policy if cache_policy is not None else self.default_cache_policy
     def items(self):
