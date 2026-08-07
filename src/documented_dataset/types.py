@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from enum import StrEnum
 from typing import TYPE_CHECKING, TypeVar
 
@@ -9,5 +9,5 @@ if TYPE_CHECKING:
 
 type AttributeName = str|StrEnum
 DocumentedDatasetType = TypeVar("DocumentedDatasetType", bound='Documented_Dataset')
-DocumentedBulkFunction = Callable[[type[DocumentedDatasetType]],xr.DataArray|dict[AttributeName,xr.DataArray]]
+DocumentedBulkFunction = Callable[[type[DocumentedDatasetType]],xr.DataArray|Mapping[AttributeName,xr.DataArray]]
 DocumentedFunction = Callable[[type[DocumentedDatasetType]],xr.DataArray]
