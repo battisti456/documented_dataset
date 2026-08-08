@@ -203,7 +203,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     @classmethod
     def compile(cls):
         cls._build_dataset()
-        with open(cls._path.with_suffix(".pyi"),'w') as file:
+        with open(Path(inspect.getfile(cls)).resolve().with_suffix(".pyi"),'w') as file:
             cls._build_documentation(file)
     @classmethod
     def _save(cls,path:str|Path):
