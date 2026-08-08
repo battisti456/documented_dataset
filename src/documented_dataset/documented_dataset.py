@@ -183,23 +183,29 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
                 file.write(f"    {da.attrs['description']}")
             file.write("\n    \"\"\"\n")
         with cls._no_caching:
-            for name, dp in cls._registry.derived.items():
-                da = dp(cls)#type:ignore
-                file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
-                file.write("    ### Dimensions\n")
-                for dim in da.dims:
-                    coord = cls._ds.coords[dim]
-                    file.write(f"    - {dim} : {coord.dtype}")
-                    if "units" in coord.attrs:
-                        file.write(f" [{coord.attrs['units']}]")
-                    file.write("\n")
-                file.write("    ### Units\n")
-                if "units" in da.attrs:
-                    file.write(f"    {da.attrs['units']}")
-                file.write("\n    ### Description\n")
-                if "description" in da.attrs:
-                    file.write(f"    {da.attrs['description']}")
-                file.write("\n    \"\"\"\n")
+            for provider in cls._registry.derived.values():
+                if provider.IS_BULK:
+                    provider = cast('Bulk_Provider[Self]',provider)
+                    ret = provider.func(cls)
+                else:
+                    provider = cast('Single_Provider[Self]',provider)
+                    ret = {provider.func.__name__: provider.func(cls)}
+                for name, da in ret.items():
+                    file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
+                    file.write("    ### Dimensions\n")
+                    for dim in da.dims:
+                        coord = cls._ds.coords[dim]
+                        file.write(f"    - {dim} : {coord.dtype}")
+                        if "units" in coord.attrs:
+                            file.write(f" [{coord.attrs['units']}]")
+                        file.write("\n")
+                    file.write("    ### Units\n")
+                    if "units" in da.attrs:
+                        file.write(f"    {da.attrs['units']}")
+                    file.write("\n    ### Description\n")
+                    if "description" in da.attrs:
+                        file.write(f"    {da.attrs['description']}")
+                    file.write("\n    \"\"\"\n")
     @classmethod
     def compile(cls):
         cls._build_dataset()

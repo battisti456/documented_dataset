@@ -73,6 +73,8 @@ class RegistryComponent(Generic[DocumentedDatasetType]):  # noqa: UP046
         return bulk_call
     def items(self):
         yield from self.registered.items()
+    def values(self):
+        yield from self.registered.values()
     def __contains__(self, item):
         return self.registered.__contains__(item)
     def __getitem__(self, key):
