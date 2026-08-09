@@ -4,16 +4,13 @@ from importlib.util import module_from_spec, spec_from_file_location
 from io import TextIOWrapper
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar, cast
+from typing import Any, Self, TypeVar
 
 import xarray as xr
 from xarray.core.coordinates import DatasetCoordinates
 
-from .caching_manager import Caching_Manager
-
-if TYPE_CHECKING:
-    from .registry import Bulk_Provider, Registry, RegistryComponent, Single_Provider
-    from .types import DocumentedDatasetType
+from .registry import Bulk_Provider, Provider, Registry
+from .types import DocumentedDatasetType
 
 
 def load_module(path:Path) -> ModuleType:
@@ -40,23 +37,26 @@ class Documented_Dataset_Meta(type):
             return _ds[name]
         elif name in _ds.coords:
             return _ds.coords[name]
-        elif name in self._registry.derived:
-            val = self._get_variable_from_registry(name,self._registry.derived,self._ds)
-            return val
         else:
-            raise DocumentedDatasetAttributeError(name=name, obj = self)
+            val = self._get_with_cache(name,self._ds)
+            if val is None:
+                raise DocumentedDatasetAttributeError(name=name, obj = self)
+            return val
 
 
 class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     _autoload_dir:Path
     _ds:xr.Dataset
     _registry:'Registry[Self]'
-    _no_caching:'Caching_Manager[Self]'
-    _cache_policy:Literal['never','always','permitted'] = 'permitted'
+    _default_cache_policy:bool
+    _default_storage_level:int
+    _currently_loading:set[Provider[Self]]
+    _is_storing:None|int
     def __init_subclass__(
             cls, *, 
             registry:'Registry[Self]|None' = None, 
-            cache_policy:Literal['never','always','permitted'] = "permitted"
+            default_cache_policy:bool = False,
+            default_storage_level:int = 0
         ) -> None:
         path = Path(inspect.getfile(cls)).resolve().parent
         if not hasattr(cls,'_autoload_dir'):
@@ -68,36 +68,31 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             cls._registry = registry
         if cls._autoload_dir.exists():
             cls._load_path(cls._autoload_dir)
-        cls._cache_policy = cache_policy
-        cls._no_caching = Caching_Manager(cls)#type:ignore
+        cls._default_cache_policy = default_cache_policy
+        cls._default_storage_level = default_storage_level
+        cls._is_storing = None
     @staticmethod
     def _validate_bulk_return(ret:dict[str,xr.DataArray],provider:'Bulk_Provider'):
         if set(ret.keys()) != set(provider.included_variables):
             raise DocumentedDatasetMismatchedGroupAttributes(f"'{provider.func.__name__} encountered a mismatch between the return dictionary keys {set(ret.keys())} and the declared variables {set(provider.included_variables)}.")
     @classmethod
-    def _get_variable_from_registry(cls,name:str,registry_component:'RegistryComponent[Self]',ds:xr.Dataset) -> xr.DataArray:
-        provider = registry_component[name]
-        if provider.IS_BULK:
-            provider = cast('Bulk_Provider[Self]',provider)
-            ret = provider.func(cls)#type:ignore
-            cls._validate_bulk_return(ret,provider)#type:ignore
-            if not cls._no_caching:
-                if isinstance(provider.cache_policy,dict):
-                    for iname, val in ret.items():
-                        cache_policy = provider.cache_policy.get(iname)
-                        if cache_policy or (cache_policy is None and registry_component.default_cache_policy):
-                            ds[iname] = val
-                if provider.cache_policy or (provider.cache_policy is None and registry_component.default_cache_policy):
-                    for iname, val in ret.items():
-                        ds[iname] = val
-            return ret[name]
-        else:
-            provider = cast('Single_Provider[Self]',provider)
-            val = provider.func(cls)#type:ignore
-            if not cls._no_caching and (provider.cache_policy or provider.cache_policy is None and registry_component.default_cache_policy):
-                ds[name] = val
-            return val
-
+    def _get_with_cache(cls,name:str,ds:xr.Dataset) -> xr.DataArray|None:
+        if name in ds:
+            return ds[name]
+        try:
+            provider = cls._registry[name]
+        except AttributeError:
+            return None
+        ret = provider(cls)#type:ignore
+        should_cache = cls._eval_cache(provider)
+        if cls._is_storing is not None:
+            should_store = cls._eval_do_store(provider,cls._is_storing)
+            for iname in should_store:
+                should_cache[iname] = True
+        for iname, val in ret.items():
+            if should_cache[iname]:
+                ds[iname] = val
+        return ret[name]
     @classmethod
     def _load_path(cls,path:Path):
         if not path.exists():
@@ -106,68 +101,36 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             load_module(path_)
 
     @classmethod
-    def _load_registry_component(cls,registry_component:'RegistryComponent[Self]',ds:xr.Dataset|DatasetCoordinates) -> dict[str,xr.DataArray]:
-        to_return = {}
-        providers = list(registry_component.registered.values())
-        last_missing_attrs = None
-        missing_attrs = set()
-        while providers:
-            next_providers = []
-            missing_attrs = set()
-            for provider in providers:
-                try:
-                    if provider.IS_BULK:
-                        provider = cast('Bulk_Provider[Self]',provider)
-                        ret = provider.func(cls)#type:ignore
-                        cls._validate_bulk_return(ret,provider)#type:ignore
-                        for name, val in ret.items():
-                            ds[name] = val
-                    else:
-                        provider = cast('Single_Provider[Self]',provider)
-                        val = provider.func(cls)#type:ignore
-                        ds[provider.func.__name__] = val
-                except DocumentedDatasetAttributeError as err:
-                    missing_attrs.add(err.name)
-                    next_providers.append(provider)
-            providers = next_providers
-            if missing_attrs == last_missing_attrs:
-                break
-            else:
-                last_missing_attrs = missing_attrs
-        if providers:
-            raise DocumentedDatasetLoopingAttributeError(f"Encountered a looping set of not yet seen attributes while loading: {missing_attrs}")
-        return to_return
+    def _load_providers(
+        cls,
+        providers:list[Provider[Self]],
+        ds:xr.Dataset|DatasetCoordinates,
+        storage_threshold:int = -1
+    ):
+        for provider in providers:
+            vars_to_store = cls._eval_do_store(provider,storage_threshold)
+            if not vars_to_store or all(name in ds for name in vars_to_store):
+                continue
+            ret = provider(cls)
+            cls._validate_bulk_return(ret,provider)#type:ignore
+            for name in vars_to_store:
+                ds[name] = ret[name]
 
     @classmethod
-    def _build_dataset(cls):
+    def _build_dataset(cls, storage_threshold:int):
         cls._ds = xr.Dataset()
-        cls._load_registry_component(cls._registry.coordinates,cls._ds.coords)
-        cls._load_registry_component(cls._registry.source,cls._ds)
+        try:
+            cls._is_storing = storage_threshold
+            cls._load_providers(list(cls._registry.coordinates()), cls._ds.coords)
+            cls._load_providers(list(cls._registry.non_coordinates()), cls._ds, storage_threshold=storage_threshold)
+        finally:
+            cls._is_storing = None
 
     @classmethod
     def _build_documentation(cls,file:TextIOWrapper):
         file.write("import xarray as xr\n")
         file.write("from documented_dataset import Documented_Dataset\n")
         file.write(f"\n\nclass {cls.__name__}(Documented_Dataset):\n")
-        for name, da in cls._ds.data_vars.items():
-            file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
-            if "long_name" in da.attrs:
-                file.write(f"    {da.attrs['long_name']}\n")
-            file.write("    ### Dimensions\n")
-            for dim in da.dims:
-                coord = cls._ds.coords[dim]
-                file.write(f"    - {dim} : {coord.attrs.get('dtype',coord.dtype)}")
-                if "units" in coord.attrs:
-                    file.write(f" [{coord.attrs['units']}]")
-                file.write("\n")
-            file.write("    ### Units\n")
-            file.write(f"    {da.attrs.get("dtype",da.dtype)}")
-            if "units" in da.attrs:
-                file.write(f" [{da.attrs['units']}]")
-            file.write("\n    ### Description\n")
-            if "description" in da.attrs:
-                file.write(f"    {da.attrs['description']}")
-            file.write("\n    \"\"\"\n")
         for name, da in cls._ds.coords.items():
             da:xr.DataArray
             file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
@@ -182,42 +145,46 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             if "description" in da.attrs:
                 file.write(f"    {da.attrs['description']}")
             file.write("\n    \"\"\"\n")
-        with cls._no_caching:
-            for provider in cls._registry.derived.values():
-                if provider.IS_BULK:
-                    provider = cast('Bulk_Provider[Self]',provider)
-                    ret = provider.func(cls)
-                else:
-                    provider = cast('Single_Provider[Self]',provider)
-                    ret = {provider.func.__name__: provider.func(cls)}
-                for name, da in ret.items():
-                    file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
-                    file.write("    ### Dimensions\n")
-                    for dim in da.dims:
-                        coord = cls._ds.coords[dim]
-                        file.write(f"    - {dim} : {coord.dtype}")
-                        if "units" in coord.attrs:
-                            file.write(f" [{coord.attrs['units']}]")
-                        file.write("\n")
-                    file.write("    ### Units\n")
-                    if "units" in da.attrs:
-                        file.write(f"    {da.attrs['units']}")
-                    file.write("\n    ### Description\n")
-                    if "description" in da.attrs:
-                        file.write(f"    {da.attrs['description']}")
-                    file.write("\n    \"\"\"\n")
+        for provider in cls._registry.non_coordinates():
+            if all(name in cls._ds for name in provider.included_variables):
+                get_from = cls._ds
+            else:
+                get_from = provider(cls)
+            for name in provider.included_variables:
+                da:xr.DataArray = get_from[name]
+                file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
+                if "long_name" in da.attrs:
+                    file.write(f"    {da.attrs['long_name']}\n")
+                file.write("    ### Dimensions\n")
+                for dim in da.dims:
+                    coord = cls._ds.coords[dim]
+                    file.write(f"    - {dim} : {coord.attrs.get('dtype',coord.dtype)}")
+                    if "units" in coord.attrs:
+                        file.write(f" [{coord.attrs['units']}]")
+                    file.write("\n")
+                file.write("    ### Units\n")
+                file.write(f"    {da.attrs.get("dtype",da.dtype)}")
+                if "units" in da.attrs:
+                    file.write(f" [{da.attrs['units']}]")
+                file.write("\n    ### Description\n")
+                if "description" in da.attrs:
+                    file.write(f"    {da.attrs['description']}")
+                file.write("\n    \"\"\"\n")
     @classmethod
-    def compile(cls):
-        cls._build_dataset()
+    def compile(cls, storage_level = 0):
+        cls._build_dataset(storage_level)
         with open(Path(inspect.getfile(cls)).resolve().with_suffix(".pyi"),'w') as file:
             cls._build_documentation(file)
     @classmethod
-    def _save(cls,path:str|Path):
-        cls._ds.to_netcdf(path, engine="h5netcdf")
+    def _save(cls,path:str|Path, storage_threshold = 0):
+        do_not_save:list[str] = []
+        for provider in cls._registry.values():
+            drop_vars = cls._eval_do_not_store(provider,storage_threshold)
+            do_not_save += [var for var in drop_vars if var in cls._ds]
+        cls._ds.drop_vars(do_not_save).to_netcdf(path, engine="h5netcdf")
     @classmethod
-    def compile_and_save(cls,path:str|Path):
-        with cls._no_caching:
-            cls.compile()
+    def compile_and_save(cls,path:str|Path, storage_level = 0):
+        cls.compile(storage_level)
         cls._save(path)
     @classmethod
     def load(cls,path:str|Path):
@@ -226,5 +193,44 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     @classmethod
     def _is_initialized(cls):
         return hasattr(cls,"_ds")
+    @classmethod
+    def _eval_cache(cls,provider:Provider[Self]) -> dict[str,bool]:
+        if isinstance(provider.cache_policy,dict):
+            to_return:dict[str,bool] = {}
+            for name in provider.included_variables:
+                if name not in provider.cache_policy or provider.cache_policy[name] is None:
+                    policy = cls._default_cache_policy
+                else:
+                    policy = provider.cache_policy[name]
+                assert policy is not None
+                to_return[name] = policy
+            return to_return
+        else:
+            policy = cls._default_cache_policy if provider.cache_policy is None else provider.cache_policy
+            return {name:policy for name in provider.included_variables}
+    @classmethod
+    def _eval_storage_level(cls,provider:Provider[Self]) -> dict[str,int]:
+        if isinstance(provider.storage_level,dict):
+            to_return:dict[str,int] = {}
+            for name in provider.included_variables:
+                if name not in provider.storage_level or provider.storage_level[name] is None:
+                    storage_level = cls._default_storage_level
+                else:
+                    storage_level = provider.storage_level[name]
+                assert storage_level is not None
+                to_return[name] = storage_level
+            return to_return
+        else:
+            storage_level = cls._default_storage_level if provider.storage_level is None else provider.storage_level
+            return {name:storage_level for name in provider.included_variables}
+    @classmethod
+    def _eval_store(cls,provider:Provider[Self],storage_threshold:int) -> dict[str,bool]:
+        return {name:storage_level <= storage_threshold for name,storage_level in cls._eval_storage_level(provider).items()}
+    @classmethod
+    def _eval_do_not_store(cls,provider:Provider[Self],storage_threshold:int) -> list[str]:
+        return [name for name,storage_level in cls._eval_storage_level(provider).items() if storage_level > storage_threshold]
+    @classmethod
+    def _eval_do_store(cls,provider:Provider[Self],storage_threshold:int) -> list[str]:
+        return [name for name,storage_level in cls._eval_storage_level(provider).items() if storage_level <= storage_threshold]
 
-DocumentedDatasetType = TypeVar("DocumentedDatasetType", bound=Documented_Dataset)
+DocumentedDatasetType = TypeVar("DocumentedDatasetType", bound=Documented_Dataset)  # noqa: F811

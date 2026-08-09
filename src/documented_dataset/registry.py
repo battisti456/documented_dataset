@@ -1,7 +1,7 @@
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import ClassVar, Generic, overload
+from typing import Generic, overload
 
+from .provider import Bulk_Provider, Provider, Single_Provider
 from .types import (
     DocumentedBulkFunction,
     DocumentedDatasetType,
@@ -9,68 +9,104 @@ from .types import (
 )
 
 
-@dataclass
-class Single_Provider(Generic[DocumentedDatasetType]):  # noqa: UP046
-    func: DocumentedFunction[DocumentedDatasetType]
-    cache_policy:bool|None
-    IS_BULK:ClassVar[bool] = False
-
-@dataclass
-class Bulk_Provider(Generic[DocumentedDatasetType]):  # noqa: UP046
-    func: DocumentedBulkFunction[DocumentedDatasetType]
-    cache_policy:bool|None|dict[str,bool|None]
-    included_variables:tuple[str,...]
-    IS_BULK:ClassVar[bool] = True
-
-type Provider[T] = Single_Provider[T]|Bulk_Provider[T]# type:ignore
-
-class RegistryComponent(Generic[DocumentedDatasetType]):  # noqa: UP046
-    def __init__(self, default_cache_policy:bool = False):
+class Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
+    def __init__(self):
         super().__init__()
-        self.default_cache_policy = default_cache_policy
         self.registered:dict[str,Provider[DocumentedDatasetType]] = {}
-    @overload
-    def __call__(
-        self,
-        func:DocumentedFunction[DocumentedDatasetType],
-        *,
-        cache:bool|None = None
-    )-> DocumentedFunction[DocumentedDatasetType]: ...
     @overload
     def __call__(self,
         func:None, 
         *,
+        storage_level:int = 0,
         cache:bool|None = None
     ) -> Callable[
         [DocumentedFunction[DocumentedDatasetType]],
         DocumentedFunction[DocumentedDatasetType]
     ]: ...
+    @overload
+    def __call__(
+        self,
+        *args:str,
+        save_priority:int|None|dict[str,int|None] = None,
+        cache:bool|None|dict[str,bool|None] = None
+    ) -> Callable[
+        [DocumentedBulkFunction[DocumentedDatasetType]],
+        DocumentedBulkFunction[DocumentedDatasetType]
+    ]: ...
+    @overload
+    def __call__(
+        self,
+        func:DocumentedFunction[DocumentedDatasetType],
+        *,
+        storage_level:int|None = None,
+        cache:bool|None = None
+    )-> DocumentedFunction[DocumentedDatasetType]: ...
     def __call__(#type:ignore
-            self,
-            func:DocumentedFunction[DocumentedDatasetType]|None = None,
-            *,
-            cache:bool|None = None
-        ) -> DocumentedFunction[DocumentedDatasetType]|Callable[
-            [DocumentedFunction[DocumentedDatasetType]],
-            DocumentedFunction[DocumentedDatasetType]
-        ]:
-        if func is not None:
-            self.registered[func.__name__] = Single_Provider(func,cache)
+        self,
+        func:DocumentedFunction[DocumentedDatasetType]|None|str = None,
+        *args:str,
+        storage_level:int|None|dict[str,int|None] = None,
+        cache:bool|None|dict[str,bool|None] = None
+    ) -> DocumentedFunction[DocumentedDatasetType]|Callable[
+        [DocumentedFunction[DocumentedDatasetType]],
+        DocumentedFunction[DocumentedDatasetType]
+    ]|Callable[
+        [DocumentedBulkFunction[DocumentedDatasetType]],
+        DocumentedBulkFunction[DocumentedDatasetType]
+    ]:
+        if func is None:# flagging call, single function with set values
+            assert not isinstance(storage_level,dict)
+            assert not isinstance(cache,dict)
+            def flagged_call(func:DocumentedFunction[DocumentedDatasetType]) -> DocumentedFunction[DocumentedDatasetType]:
+                self.__call__(func,storage_level=storage_level,cache=cache)
+                return func
+            return flagged_call
+        elif isinstance(func,str):#bulk function
+            args = (func,) + args
+            if isinstance(cache,dict):
+                args += tuple(cache.keys())
+            if isinstance(storage_level,dict):
+                args += tuple(storage_level.keys())
+            args = tuple(set(args))
+            def bulk_call(func:DocumentedBulkFunction[DocumentedDatasetType]) -> DocumentedBulkFunction[DocumentedDatasetType]:
+                provider= Bulk_Provider(func,storage_level,cache,args,False)
+                for name in args:
+                    self.registered[name] = provider
+                return func
+            return bulk_call
+        else:#default behavior, single function, no flags
+            assert not isinstance(storage_level,dict)
+            assert not isinstance(cache,dict)
+            self.registered[func.__name__] = Single_Provider(func,storage_level,cache,(func.__name__,),False)
             return func
-        def flagged_call(func:DocumentedFunction[DocumentedDatasetType]) -> DocumentedFunction[DocumentedDatasetType]:
-            self(func,cache=cache)
-            return func
-        return flagged_call
-    def outputs(self,*args:str,cache:bool|None|dict[str,bool|None] = None) -> Callable[[DocumentedBulkFunction[DocumentedDatasetType]],DocumentedBulkFunction[DocumentedDatasetType]]:
-        if isinstance(cache,dict):
-            args += tuple(cache.keys())
+    @overload
+    def coordinate(
+        self,
+        func:DocumentedFunction[DocumentedDatasetType],
+        \
+    ) -> DocumentedFunction[DocumentedDatasetType]: ...
+    @overload
+    def coordinate(
+        self,
+        func:str,
+        *names:str,
+    ) -> Callable[[DocumentedBulkFunction[DocumentedDatasetType]],DocumentedBulkFunction[DocumentedDatasetType]]: ...
+    def coordinate(
+        self,
+        func:DocumentedFunction[DocumentedDatasetType]|str,
+        *args:str,
+    ) -> DocumentedFunction[DocumentedDatasetType]|Callable[[DocumentedBulkFunction[DocumentedDatasetType]],DocumentedBulkFunction[DocumentedDatasetType]]:
+        if isinstance(func,str):
+            args = (func,) + args
+            def bulk_call(func:DocumentedBulkFunction[DocumentedDatasetType]) -> DocumentedBulkFunction[DocumentedDatasetType]:
+                provider = Bulk_Provider(func,-1,False,args,True)
+                for name in args:
+                    self.registered[name] = provider
+                return func
+            return bulk_call
         else:
-            ...
-        def bulk_call(func:DocumentedBulkFunction[DocumentedDatasetType]) -> DocumentedBulkFunction[DocumentedDatasetType]:
-            for name in args:
-                self.registered[name] = Bulk_Provider(func,cache,args)
+            self.registered[func.__name__] = Single_Provider(func,-1,False,(func.__name__,),False)
             return func
-        return bulk_call
     def items(self):
         yield from self.registered.items()
     def values(self):
@@ -79,11 +115,11 @@ class RegistryComponent(Generic[DocumentedDatasetType]):  # noqa: UP046
         return self.registered.__contains__(item)
     def __getitem__(self, key):
         return self.registered.__getitem__(key)
+    def coordinates(self):
+        yield from (value for _,value in self.registered.items() if value.coordinate)
+    def non_coordinates(self):
+        yield from (value for _,value in self.registered.items() if not value.coordinate)
 
 
-class Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
-    def __init__(self):
-        self.coordinates:RegistryComponent[DocumentedDatasetType] = RegistryComponent()
-        self.source:RegistryComponent[DocumentedDatasetType] = RegistryComponent()
-        self.derived:RegistryComponent[DocumentedDatasetType] = RegistryComponent(default_cache_policy=False)
+
 
