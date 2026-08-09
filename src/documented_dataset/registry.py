@@ -15,7 +15,7 @@ class Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
         self.registered:dict[str,Provider[DocumentedDatasetType]] = {}
     @overload
     def __call__(self,
-        func:None, 
+        func:None = None, 
         *,
         storage_level:int = 0,
         cache:bool|None = None
