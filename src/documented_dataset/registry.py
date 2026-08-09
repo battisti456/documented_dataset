@@ -26,8 +26,9 @@ class Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
     @overload
     def __call__(
         self,
+        func:str,
         *args:str,
-        save_priority:int|None|dict[str,int|None] = None,
+        storage_level:int|None|dict[str,int|None] = None,
         cache:bool|None|dict[str,bool|None] = None
     ) -> Callable[
         [DocumentedBulkFunction[DocumentedDatasetType]],
