@@ -14,7 +14,7 @@ ReturnVar = TypeVar("ReturnVar", bound=xr.DataArray|dict[str,xr.DataArray])
 CacheVar = TypeVar("CacheVar")
 PriorityVar = TypeVar("PriorityVar")
 
-@dataclass(frozen=True, eq=False)
+@dataclass(eq=False)
 class Base_Provider(ABC, Generic[DocumentedDatasetType,ReturnVar,CacheVar,PriorityVar]):  # noqa: UP046
     func:Callable[[type[DocumentedDatasetType]],ReturnVar]
     storage_level:PriorityVar
@@ -35,23 +35,20 @@ class Base_Provider(ABC, Generic[DocumentedDatasetType,ReturnVar,CacheVar,Priori
                 "There is a loop in your variable logic."
             )
         else:
-            self._set_is_running(True)
+            self._is_running = True
             try:
                 val = self.func(cls)
                 if isinstance(val,xr.DataArray):
                     val = {self.included_variables[0]:val}
                 return val
             finally:
-                self._set_is_running(False)
-    def _set_is_running(self,value:bool):
-        setattr(self,'_is_running',value)  # noqa: B010
-    
+                self._is_running = False
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class Single_Provider(Base_Provider[DocumentedDatasetType,xr.DataArray,bool|None,int|None]): ...
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class Bulk_Provider(Base_Provider[DocumentedDatasetType,dict[str,xr.DataArray],bool|None|dict[str,bool|None],int|None|dict[str,int|None]]):  ...
 
 Provider = Single_Provider[DocumentedDatasetType]|Bulk_Provider[DocumentedDatasetType]
