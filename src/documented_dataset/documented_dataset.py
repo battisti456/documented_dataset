@@ -130,7 +130,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     def _build_documentation(cls,file:TextIOWrapper):
         file.write("import xarray as xr\n")
         file.write("from documented_dataset import Documented_Dataset\n")
-        file.write(f"\n\nclass {cls.__name__}(Documented_Dataset):\n")
+        file.write(f"\nclass {cls.__name__}(Documented_Dataset):\n")
         for name, da in cls._ds.coords.items():
             da:xr.DataArray
             file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")

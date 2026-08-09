@@ -117,9 +117,9 @@ class Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
     def __getitem__(self, key):
         return self.registered.__getitem__(key)
     def coordinates(self):
-        yield from (value for _,value in self.registered.items() if value.coordinate)
+        yield from {value for _,value in self.registered.items() if value.coordinate}
     def non_coordinates(self):
-        yield from (value for _,value in self.registered.items() if not value.coordinate)
+        yield from {value for _,value in self.registered.items() if not value.coordinate}
 
 
 
