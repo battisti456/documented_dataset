@@ -34,13 +34,13 @@ class RegistryComponent(Generic[DocumentedDatasetType]):  # noqa: UP046
         self,
         func:DocumentedFunction[DocumentedDatasetType],
         *,
-        cache:bool|None
+        cache:bool|None = None
     )-> DocumentedFunction[DocumentedDatasetType]: ...
     @overload
     def __call__(self,
         func:None, 
         *,
-        cache:bool|None
+        cache:bool|None = None
     ) -> Callable[
         [DocumentedFunction[DocumentedDatasetType]],
         DocumentedFunction[DocumentedDatasetType]
