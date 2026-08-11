@@ -1,4 +1,5 @@
 import inspect
+from collections.abc import Sequence
 from importlib import import_module
 from importlib.util import module_from_spec, spec_from_file_location
 from io import TextIOWrapper
@@ -9,6 +10,12 @@ from typing import Any, Self, TypeVar
 import xarray as xr
 from xarray.core.coordinates import DatasetCoordinates
 
+from ._dims import _Dims
+from .exceptions import (
+    DocumentedDatasetAttributeError,
+    DocumentedDatasetDimensionError,
+    DocumentedDatasetMismatchedGroupAttributes,
+)
 from .registry import Bulk_Provider, Provider, Registry
 from .types import DocumentedDatasetType
 
@@ -21,10 +28,6 @@ def load_module(path:Path) -> ModuleType:
     spec.loader.exec_module(module)
     return module
 
-
-class DocumentedDatasetAttributeError(AttributeError): ...
-class DocumentedDatasetLoopingAttributeError(Exception): ...
-class DocumentedDatasetMismatchedGroupAttributes(Exception): ...
 
 class Documented_Dataset_Meta(type):
     def __getattr__(self:type['DocumentedDatasetType'], name: str) -> Any: # type: ignore
@@ -52,6 +55,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     _default_storage_level:int
     _currently_loading:set[Provider[Self]]
     _is_storing:None|int
+    dims:_Dims
     def __init_subclass__(
             cls, *, 
             registry:'Registry[Self]|None' = None, 
@@ -71,10 +75,13 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
         cls._default_cache_policy = default_cache_policy
         cls._default_storage_level = default_storage_level
         cls._is_storing = None
+        cls.dims = _Dims()
     @staticmethod
     def _validate_bulk_return(ret:dict[str,xr.DataArray],provider:'Bulk_Provider'):
         if set(ret.keys()) != set(provider.included_variables):
-            raise DocumentedDatasetMismatchedGroupAttributes(f"'{provider.func.__name__} encountered a mismatch between the return dictionary keys {set(ret.keys())} and the declared variables {set(provider.included_variables)}.")
+            raise DocumentedDatasetMismatchedGroupAttributes(
+                f"'{provider.func.__name__} encountered a mismatch between the return dictionary keys "
+                f" {set(ret.keys())} and the declared variables {set(provider.included_variables)}.")
     @classmethod
     def _get_with_cache(cls,name:str,ds:xr.Dataset) -> xr.DataArray|None:
         if name in ds:
@@ -121,16 +128,37 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
         cls._ds = xr.Dataset()
         try:
             cls._is_storing = storage_threshold
-            cls._load_providers(list(cls._registry.coordinates()), cls._ds.coords)
-            cls._load_providers(list(cls._registry.non_coordinates()), cls._ds, storage_threshold=storage_threshold)
+            cls._load_providers(list(cls._registry._dim_coords()), cls._ds.coords)
+            for dim in cls._ds.dims:
+                assert isinstance(dim,str)
+                setattr(cls.dims,dim,dim)
+            cls._load_providers(list(cls._registry._non_dim_coords()), cls._ds, storage_threshold=storage_threshold)
         finally:
             cls._is_storing = None
 
     @classmethod
     def _build_documentation(cls,file:TextIOWrapper):
-        file.write("import xarray as xr\n")
-        file.write("from documented_dataset import Documented_Dataset\n")
-        file.write(f"\nclass {cls.__name__}(Documented_Dataset):\n")
+        file.write(
+            "from typing import Any, Literal"\
+            "from collections.abc import Sequence"\
+            ""\
+            "import xarray as xr" \
+            "from documented_dataset import Documented_Dataset"\
+            f"class {cls.__name__}(Documented_Dataset):"\
+            "   class dims:"\
+        )
+        file.writelines(f"        {name}:Literal[\"{name}\"]\n" for name in cls.dims._names())
+        file.write(
+            "   @classmethod"\
+            "   def array(" \
+            "       cls, " \
+            "       data:Any, "
+            "       *, " \
+            "       dims:Sequence[str], " \
+            "       attrs:dict[str,str] = ...," \
+        )
+        file.writelines(f"        {name}:xr.DataArray = ..." for name in cls.dims._names())
+        file.write("    ) -> xr.DataArray: ...") 
         for name, da in cls._ds.coords.items():
             da:xr.DataArray
             file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
@@ -145,7 +173,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             if "description" in da.attrs:
                 file.write(f"    {da.attrs['description']}")
             file.write("\n    \"\"\"\n")
-        for provider in cls._registry.non_coordinates():
+        for provider in cls._registry._non_dim_coords():
             if all(name in cls._ds for name in provider.included_variables):
                 get_from = cls._ds
             else:
@@ -190,6 +218,9 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     def load(cls,path:str|Path):
         ds = xr.load_dataset(path)
         cls._ds = ds
+        for dim in cls._ds.dims:
+            assert isinstance(dim,str)
+            setattr(cls.dims,dim,dim)
     @classmethod
     def _is_initialized(cls):
         return hasattr(cls,"_ds")
@@ -232,5 +263,23 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     @classmethod
     def _eval_do_store(cls,provider:Provider[Self],storage_threshold:int) -> list[str]:
         return [name for name,storage_level in cls._eval_storage_level(provider).items() if storage_level <= storage_threshold]
+    @classmethod
+    def array(cls,data:Any,*,dims:Sequence[str],attrs:dict[str,str]|None = None,**kwargs:Any):
+        if any(coord not in dims for coord in kwargs):
+            raise DocumentedDatasetDimensionError(
+                "All assignments must be specifically stated in dims."
+            )
+        coords = {
+            dim: cls._ds.coords[dim]
+            for dim in dims
+            if dim in cls._ds.coords
+        }
+        coords.update(kwargs)
+        return xr.DataArray(
+            data,
+            dims = dims,
+            coords = coords,
+            attrs={} if attrs is None else attrs
+        )
 
 DocumentedDatasetType = TypeVar("DocumentedDatasetType", bound=Documented_Dataset)  # noqa: F811

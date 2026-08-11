@@ -5,10 +5,8 @@ from typing import Generic, TypeVar
 
 import xarray as xr
 
+from .exceptions import DocumentedDatasetLoopingProviderExecution
 from .types import DocumentedDatasetType
-
-
-class DocumentedDatasetLoopingProviderExecution(Exception): ...
 
 ReturnVar = TypeVar("ReturnVar", bound=xr.DataArray|dict[str,xr.DataArray])
 CacheVar = TypeVar("CacheVar")
@@ -20,7 +18,7 @@ class Base_Provider(ABC, Generic[DocumentedDatasetType,ReturnVar,CacheVar,Priori
     storage_level:PriorityVar
     cache_policy:CacheVar
     included_variables:tuple[str,...]
-    coordinate:bool
+    dim_coord:bool
     _is_running:bool = field(
         default=False,
         init=False,
