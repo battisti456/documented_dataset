@@ -121,7 +121,10 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             ret = provider(cls)
             cls._validate_bulk_return(ret,provider)#type:ignore
             for name in vars_to_store:
-                ds[name] = ret[name]
+                val = ret[name]
+                if provider.dim_coord and "dim_0" in val.dims:
+                    val = val.swap_dims({"dim_0" : name})
+                ds[name] = val
 
     @classmethod
     def _build_dataset(cls, storage_threshold:int):
