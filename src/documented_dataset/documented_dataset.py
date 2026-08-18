@@ -75,7 +75,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
         cls._default_cache_policy = default_cache_policy
         cls._default_storage_level = default_storage_level
         cls._is_storing = None
-        cls.dims = _Dims()
+        cls.dims = _Dims(cls)
     @staticmethod
     def _validate_bulk_return(ret:dict[str,xr.DataArray],provider:'Bulk_Provider'):
         if set(ret.keys()) != set(provider.included_variables):
@@ -142,23 +142,23 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     @classmethod
     def _build_documentation(cls,file:TextIOWrapper):
         file.write(
-            "from typing import Any, Literal"\
-            "from collections.abc import Sequence"\
-            ""\
-            "import xarray as xr" \
-            "from documented_dataset import Documented_Dataset"\
-            f"class {cls.__name__}(Documented_Dataset):"\
-            "   class dims:"\
+            "from typing import Any, Literal\n"
+            "from collections.abc import Sequence\n"
+            "\n"
+            "import xarray as xr\n"
+            "from documented_dataset import Documented_Dataset\n"
+            f"class {cls.__name__}(Documented_Dataset):\n"
+            "   class dims:\n"
         )
         file.writelines(f"        {name}:Literal[\"{name}\"]\n" for name in cls.dims._names())
         file.write(
-            "   @classmethod"\
-            "   def array(" \
-            "       cls, " \
+            "   @classmethod\n"
+            "   def array(\n"
+            "       cls, \n"
             "       data:Any, "
-            "       *, " \
-            "       dims:Sequence[str], " \
-            "       attrs:dict[str,str] = ...," \
+            "       *, \n"
+            "       dims:Sequence[str], \n"
+            "       attrs:dict[str,str] = ...,\n"
         )
         file.writelines(f"        {name}:xr.DataArray = ..." for name in cls.dims._names())
         file.write("    ) -> xr.DataArray: ...") 
