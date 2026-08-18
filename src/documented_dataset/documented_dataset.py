@@ -153,14 +153,14 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
         file.writelines(f"        {name}:Literal[\"{name}\"]\n" for name in cls.dims._names())
         file.write(
             "   @classmethod\n"
-            "   def array(\n"
+            "   def array(#type:ignore\n"
             "       cls, \n"
             "       data:Any, "
             "       *, \n"
             "       dims:Sequence[str], \n"
             "       attrs:dict[str,str] = ...,\n"
         )
-        file.writelines(f"       {name}:xr.DataArray = ...\n" for name in cls.dims._names())
+        file.writelines(f"       {name}:xr.DataArray = ...,\n" for name in cls.dims._names())
         file.write("    ) -> xr.DataArray: ...") 
         for name, da in cls._ds.coords.items():
             da:xr.DataArray
