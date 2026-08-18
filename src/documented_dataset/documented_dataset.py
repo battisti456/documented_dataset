@@ -148,20 +148,20 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             "import xarray as xr\n"
             "from documented_dataset import Documented_Dataset\n"
             f"class {cls.__name__}(Documented_Dataset):\n"
-            "   class dims:#type:ignore\n"
+            "    class dims:#type:ignore\n"
         )
         file.writelines(f"        {name}:Literal[\"{name}\"]\n" for name in cls.dims._names())
         file.write(
-            "   @classmethod\n"
-            "   def array(#type:ignore\n"
-            "       cls, \n"
-            "       data:Any, "
-            "       *, \n"
-            "       dims:Sequence[str], \n"
-            "       attrs:dict[str,str] = ...,\n"
+            "    @classmethod\n"
+            "    def array(#type:ignore\n"
+            "         cls, \n"
+            "         data:Any, "
+            "         *, \n"
+            "         dims:Sequence[str], \n"
+            "         attrs:dict[str,str] = ...,\n"
         )
-        file.writelines(f"       {name}:xr.DataArray = ...,\n" for name in cls.dims._names())
-        file.write("    ) -> xr.DataArray: ...") 
+        file.writelines(f"         {name}:xr.DataArray = ...,\n" for name in cls.dims._names())
+        file.write("    ) -> xr.DataArray: ...\n") 
         for name, da in cls._ds.coords.items():
             da:xr.DataArray
             file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
