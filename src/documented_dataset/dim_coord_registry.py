@@ -15,6 +15,7 @@ class Dim_Coord_Assn:
 
 class Dim_Coord(str,Generic['DocumentedDatasetType']):
     _dd:type['DocumentedDatasetType']
+    _pre_declared_attrs:Attrs
     def __new__(
             cls, 
             name, 
@@ -29,9 +30,14 @@ class Dim_Coord(str,Generic['DocumentedDatasetType']):
     @property
     def dim(self) -> str:
         return str(self)
-    def __call__(self,value:xr.DataArray|np.ndarray, attrs:Attrs|None = None) -> Dim_Coord_Assn:
+    def __call__(self,value:xr.DataArray|np.ndarray|None = None, attrs:Attrs|None = None) -> 'Dim_Coord_Assn|Dim_Coord':
         if attrs is None:
             attrs = {}
+        if hasattr(self,"_pre_declared_attrs"):
+            attrs = self._pre_declared_attrs | attrs
+        if value is None:
+            self._pre_declared_attrs = attrs
+            return self
         to_assign:xr.DataArray
         if isinstance(value,xr.DataArray):
             if "dim0" in value.dims:
