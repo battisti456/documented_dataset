@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Generic
+from typing import Any, Generic, Unpack
 
 import numpy as np
 import xarray as xr
@@ -30,9 +30,10 @@ class Dim_Coord(str,Generic['DocumentedDatasetType']):
     @property
     def dim(self) -> str:
         return str(self)
-    def __call__(self,value:xr.DataArray|np.ndarray|None = None, attrs:Attrs|None = None) -> 'Dim_Coord_Assn|Dim_Coord':
+    def __call__(self,value:xr.DataArray|np.ndarray|None = None, attrs:Attrs|None = None,**kwargs:Unpack[Attrs]) -> 'Dim_Coord_Assn|Dim_Coord':
         if attrs is None:
             attrs = {}
+        attrs = attrs | kwargs
         if hasattr(self,"_pre_declared_attrs"):
             attrs = self._pre_declared_attrs | attrs
         if value is None:
