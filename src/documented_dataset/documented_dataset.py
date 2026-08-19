@@ -72,6 +72,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
         cls._default_storage_level = default_storage_level
         cls._is_storing = None
         cls.dims = Dim_Coord_Registry(cls)
+        cls._ds = xr.Dataset()
     @staticmethod
     def _validate_bulk_return(ret:dict[str,xr.DataArray],provider:'Bulk_Provider'):
         if set(ret.keys()) != set(provider.included_variables):
@@ -121,7 +122,6 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
 
     @classmethod
     def _build_dataset(cls, storage_threshold:int):
-        cls._ds = xr.Dataset()
         try:
             cls._is_storing = storage_threshold
             for dim in cls._ds.dims:
@@ -162,7 +162,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     @classmethod
     def load(cls,path:str|Path):
         ds = xr.load_dataset(path)
-        cls._ds = ds
+        cls._ds = xr.merge([ds,cls._ds])
         cls.dims.load()
     @classmethod
     def _is_initialized(cls):
