@@ -67,7 +67,7 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
         return Dim_Coord_Assn(self,np.asarray(value))
     def __copy__(self):
         return str(self)
-    def __deepcopy__(self):
+    def __deepcopy__(self, memo):
         return str(self)
 
 class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
