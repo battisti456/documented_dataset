@@ -65,6 +65,10 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
         else:
             self._dd._ds.coords.update({self:to_assign})
         return Dim_Coord_Assn(self,np.asarray(value))
+    def __copy__(self):
+        return str(self)
+    def __deepcopy__(self):
+        return str(self)
 
 class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
     def __init__(self,dd:type[DocumentedDatasetType]):
