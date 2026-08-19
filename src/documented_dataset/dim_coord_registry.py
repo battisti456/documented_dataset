@@ -13,13 +13,13 @@ class Dim_Coord_Assn:
     dim_coord:'Dim_Coord'
     data:np.ndarray
 
-class Dim_Coord(str,Generic['DocumentedDatasetType']):
-    _dd:type['DocumentedDatasetType']
+class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
+    _dd:type[DocumentedDatasetType]
     _pre_declared_attrs:Attrs
     def __new__(
             cls, 
             name, 
-            dd:type['DocumentedDatasetType'], 
+            dd:type[DocumentedDatasetType], 
         ):
         val = str.__new__(cls, name)
         val._dd = dd
@@ -66,8 +66,8 @@ class Dim_Coord(str,Generic['DocumentedDatasetType']):
             self._dd._ds.coords.update({self:to_assign})
         return Dim_Coord_Assn(self,np.asarray(value))
 
-class Dim_Coord_Registry(Generic['DocumentedDatasetType']):
-    def __init__(self,dd:type['DocumentedDatasetType']):
+class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
+    def __init__(self,dd:type[DocumentedDatasetType]):
         self._registered:dict[str,Dim_Coord] = {}
         self._dd = dd
     def load(self):
