@@ -55,11 +55,9 @@ def dcr_to_str(dcr:Dim_Coord_Registry):
     
 def dd_to_str(dd:type['DocumentedDatasetType']) -> str:
     return '\n'.join((
-            "from typing import Any, Literal",
-            "from collections.abc import Sequence",
-            "",
             "import xarray as xr",
-            "from documented_dataset import Documented_Dataset, Dim_Coord, Dim_Coord_Registry",
+            "from documented_dataset import Dim_Coord, Dim_Coord_Registry, Documented_Dataset",
+            "",
             f"class {dd.__name__}(Documented_Dataset):",
             indent('\n'.join((
                 dcr_to_str(dd.dims),
