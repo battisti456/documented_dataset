@@ -1,4 +1,4 @@
-from typing import TypedDict, Unpack
+from typing import Any, TypedDict, Unpack
 
 
 class Attrs(TypedDict, total = False):
@@ -6,7 +6,7 @@ class Attrs(TypedDict, total = False):
     description:str
     long_name:str
     dtype:str
-
+    fill_value:Any|None
 class attrs(dict):
     def __init__(self,**kwargs: Unpack[Attrs]):
         super().__init__(**kwargs)

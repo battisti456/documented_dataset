@@ -18,7 +18,6 @@ class Base_Provider(ABC, Generic[DocumentedDatasetType,ReturnVar,CacheVar,Priori
     storage_level:PriorityVar
     cache_policy:CacheVar
     included_variables:tuple[str,...]
-    dim_coord:bool
     _is_running:bool = field(
         default=False,
         init=False,

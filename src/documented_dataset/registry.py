@@ -70,7 +70,7 @@ class Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
                 args += tuple(storage_level.keys())
             args = tuple(set(args))
             def bulk_call(func:DocumentedBulkFunction[DocumentedDatasetType]) -> DocumentedBulkFunction[DocumentedDatasetType]:
-                provider= Bulk_Provider(func,storage_level,cache,args,False)
+                provider= Bulk_Provider(func,storage_level,cache,args)
                 for name in args:
                     self.registered[name] = provider
                 return func
@@ -78,35 +78,7 @@ class Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
         else:#default behavior, single function, no flags
             assert not isinstance(storage_level,dict)
             assert not isinstance(cache,dict)
-            self.registered[func.__name__] = Single_Provider(func,storage_level,cache,(func.__name__,),False)
-            return func
-    @overload
-    def dim_coord(
-        self,
-        func:DocumentedFunction[DocumentedDatasetType],
-        \
-    ) -> DocumentedFunction[DocumentedDatasetType]: ...
-    @overload
-    def dim_coord(
-        self,
-        func:str,
-        *names:str,
-    ) -> Callable[[DocumentedBulkFunction[DocumentedDatasetType]],DocumentedBulkFunction[DocumentedDatasetType]]: ...
-    def dim_coord(
-        self,
-        func:DocumentedFunction[DocumentedDatasetType]|str,
-        *args:str,
-    ) -> DocumentedFunction[DocumentedDatasetType]|Callable[[DocumentedBulkFunction[DocumentedDatasetType]],DocumentedBulkFunction[DocumentedDatasetType]]:
-        if isinstance(func,str):
-            args = (func,) + args
-            def bulk_call(func:DocumentedBulkFunction[DocumentedDatasetType]) -> DocumentedBulkFunction[DocumentedDatasetType]:
-                provider = Bulk_Provider(func,-1,False,args,True)
-                for name in args:
-                    self.registered[name] = provider
-                return func
-            return bulk_call
-        else:
-            self.registered[func.__name__] = Single_Provider(func,-1,False,(func.__name__,),False)
+            self.registered[func.__name__] = Single_Provider(func,storage_level,cache,(func.__name__,))
             return func
     def items(self):
         yield from self.registered.items()
@@ -116,10 +88,6 @@ class Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
         return self.registered.__contains__(item)
     def __getitem__(self, key):
         return self.registered.__getitem__(key)
-    def _dim_coords(self):
-        yield from {value for _,value in self.registered.items() if value.dim_coord}
-    def _non_dim_coords(self):
-        yield from {value for _,value in self.registered.items() if not value.dim_coord}
 
 
 

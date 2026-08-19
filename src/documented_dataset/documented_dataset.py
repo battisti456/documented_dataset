@@ -1,5 +1,4 @@
 import inspect
-from collections.abc import Sequence
 from importlib import import_module
 from importlib.util import module_from_spec, spec_from_file_location
 from io import TextIOWrapper
@@ -10,10 +9,10 @@ from typing import Any, Self, TypeVar
 import xarray as xr
 from xarray.core.coordinates import DatasetCoordinates
 
-from ._dims import _Dims
+from .dim_coord_registry import Dim_Coord, Dim_Coord_Assn, Dim_Coord_Registry
+from .documentation import dd_to_str
 from .exceptions import (
     DocumentedDatasetAttributeError,
-    DocumentedDatasetDimensionError,
     DocumentedDatasetMismatchedGroupAttributes,
 )
 from .registry import Bulk_Provider, Provider, Registry
@@ -38,14 +37,11 @@ class Documented_Dataset_Meta(type):
         _ds:xr.Dataset = object.__getattribute__(self,"_ds")
         if name in _ds:
             return _ds[name]
-        elif name in _ds.coords:
-            return _ds.coords[name]
         else:
             val = self._get_with_cache(name,self._ds)
             if val is None:
                 raise DocumentedDatasetAttributeError(name=name, obj = self)
             return val
-
 
 class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     _autoload_dir:Path
@@ -55,7 +51,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     _default_storage_level:int
     _currently_loading:set[Provider[Self]]
     _is_storing:None|int
-    dims:_Dims
+    dims:Dim_Coord_Registry
     def __init_subclass__(
             cls, *, 
             registry:'Registry[Self]|None' = None, 
@@ -75,7 +71,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
         cls._default_cache_policy = default_cache_policy
         cls._default_storage_level = default_storage_level
         cls._is_storing = None
-        cls.dims = _Dims(cls)
+        cls.dims = Dim_Coord_Registry(cls)
     @staticmethod
     def _validate_bulk_return(ret:dict[str,xr.DataArray],provider:'Bulk_Provider'):
         if set(ret.keys()) != set(provider.included_variables):
@@ -121,86 +117,32 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             ret = provider(cls)
             cls._validate_bulk_return(ret,provider)#type:ignore
             for name in vars_to_store:
-                val = ret[name]
-                if provider.dim_coord and "dim_0" in val.dims:
-                    val = val.swap_dims({"dim_0" : name})
-                ds[name] = val
+                ds[name] = ret[name]
 
     @classmethod
     def _build_dataset(cls, storage_threshold:int):
         cls._ds = xr.Dataset()
         try:
             cls._is_storing = storage_threshold
-            cls._load_providers(list(cls._registry._dim_coords()), cls._ds.coords)
             for dim in cls._ds.dims:
                 assert isinstance(dim,str)
                 setattr(cls.dims,dim,dim)
-            cls._load_providers(list(cls._registry._non_dim_coords()), cls._ds, storage_threshold=storage_threshold)
+            cls._load_providers(list(cls._registry.values()), cls._ds, storage_threshold=storage_threshold)
         finally:
             cls._is_storing = None
 
     @classmethod
     def _build_documentation(cls,file:TextIOWrapper):
-        file.write(
-            "from typing import Any, Literal\n"
-            "from collections.abc import Sequence\n"
-            "\n"
-            "import xarray as xr\n"
-            "from documented_dataset import Documented_Dataset\n"
-            f"class {cls.__name__}(Documented_Dataset):\n"
-            "    class dims:#type:ignore\n"
-        )
-        file.writelines(f"        {name}:Literal[\"{name}\"]\n" for name in cls.dims._names())
-        file.write(
-            "    @classmethod\n"
-            "    def array(#type:ignore\n"
-            "         cls, \n"
-            "         data:Any, "
-            "         *, \n"
-            "         dims:Sequence[str], \n"
-            "         attrs:dict[str,str] = ...,\n"
-        )
-        file.writelines(f"         {name}:xr.DataArray = ...,\n" for name in cls.dims._names())
-        file.write("    ) -> xr.DataArray: ...\n") 
-        for name, da in cls._ds.coords.items():
-            da:xr.DataArray
-            file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
-            file.write("    Coordinate.\n")
-            if "long_name" in da.attrs:
-                file.write(f"    {da.attrs['long_name']}\n")
-            file.write("    ### Units\n")
-            file.write(f"    {da.attrs.get("dtype",da.dtype)}")
-            if "units" in da.attrs:
-                file.write(f" [{da.attrs['units']}]")
-            file.write("\n    ### Description\n")
-            if "description" in da.attrs:
-                file.write(f"    {da.attrs['description']}")
-            file.write("\n    \"\"\"\n")
-        for provider in cls._registry._non_dim_coords():
+        file.write(dd_to_str(cls))
+    @classmethod
+    def _get_name_da(cls):
+        for provider in cls._registry.values():
             if all(name in cls._ds for name in provider.included_variables):
                 get_from = cls._ds
             else:
                 get_from = provider(cls)
             for name in provider.included_variables:
-                da:xr.DataArray = get_from[name]
-                file.write(f"    {name}:xr.DataArray\n    \"\"\"\n")
-                if "long_name" in da.attrs:
-                    file.write(f"    {da.attrs['long_name']}\n")
-                file.write("    ### Dimensions\n")
-                for dim in da.dims:
-                    coord = cls._ds.coords[dim]
-                    file.write(f"    - {dim} : {coord.attrs.get('dtype',coord.dtype)}")
-                    if "units" in coord.attrs:
-                        file.write(f" [{coord.attrs['units']}]")
-                    file.write("\n")
-                file.write("    ### Units\n")
-                file.write(f"    {da.attrs.get("dtype",da.dtype)}")
-                if "units" in da.attrs:
-                    file.write(f" [{da.attrs['units']}]")
-                file.write("\n    ### Description\n")
-                if "description" in da.attrs:
-                    file.write(f"    {da.attrs['description']}")
-                file.write("\n    \"\"\"\n")
+                yield name,get_from[name]
     @classmethod
     def compile(cls, storage_level = 0):
         cls._build_dataset(storage_level)
@@ -221,9 +163,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     def load(cls,path:str|Path):
         ds = xr.load_dataset(path)
         cls._ds = ds
-        for dim in cls._ds.dims:
-            assert isinstance(dim,str)
-            setattr(cls.dims,dim,dim)
+        cls.dims.load()
     @classmethod
     def _is_initialized(cls):
         return hasattr(cls,"_ds")
@@ -267,22 +207,10 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     def _eval_do_store(cls,provider:Provider[Self],storage_threshold:int) -> list[str]:
         return [name for name,storage_level in cls._eval_storage_level(provider).items() if storage_level <= storage_threshold]
     @classmethod
-    def array(cls,data:Any,*,dims:Sequence[str],attrs:dict[str,str]|None = None,**kwargs:Any):
-        if any(coord not in dims for coord in kwargs):
-            raise DocumentedDatasetDimensionError(
-                "All assignments must be specifically stated in dims."
-            )
-        coords = {
-            dim: cls._ds.coords[dim]
-            for dim in dims
-            if dim in cls._ds.coords
-        }
-        coords.update(kwargs)
-        return xr.DataArray(
-            data,
-            dims = dims,
-            coords = coords,
-            attrs={} if attrs is None else attrs
-        )
+    def declare(cls,*args:Dim_Coord_Assn|Dim_Coord|str) -> type[Self]:
+        for arg in args:
+            if isinstance(arg,str) and not isinstance(arg,Dim_Coord):
+                cls.dims.add_dim(arg)
+        return cls
 
 DocumentedDatasetType = TypeVar("DocumentedDatasetType", bound=Documented_Dataset)  # noqa: F811
