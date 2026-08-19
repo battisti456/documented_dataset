@@ -127,7 +127,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             for dim in cls._ds.dims:
                 assert isinstance(dim,str)
                 setattr(cls.dims,dim,dim)
-            cls._load_providers(list(cls._registry.values()), cls._ds, storage_threshold=storage_threshold)
+            cls._load_providers(list(cls._registry.providers()), cls._ds, storage_threshold=storage_threshold)
         finally:
             cls._is_storing = None
 
@@ -136,7 +136,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
         file.write(dd_to_str(cls))
     @classmethod
     def _get_name_da(cls):
-        for provider in cls._registry.values():
+        for provider in cls._registry.providers():
             if all(name in cls._ds for name in provider.included_variables):
                 get_from = cls._ds
             else:
@@ -151,7 +151,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     @classmethod
     def _save(cls,path:str|Path, storage_threshold = 0):
         do_not_save:list[str] = []
-        for provider in cls._registry.values():
+        for provider in cls._registry.providers():
             drop_vars = cls._eval_do_not_store(provider,storage_threshold)
             do_not_save += [var for var in drop_vars if var in cls._ds]
         cls._ds.drop_vars(do_not_save).to_netcdf(path, engine="h5netcdf")

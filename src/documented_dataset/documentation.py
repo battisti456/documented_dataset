@@ -48,7 +48,7 @@ def dc_to_str(dc:Dim_Coord) -> str:
 
 def dcr_to_str(dcr:Dim_Coord_Registry):
     return '\n'.join((
-        "class _dims_type(Dim_Coord_Registry):#type:ignore",
+        "class _dims_type(Dim_Coord_Registry):",
         indent('\n'.join(
             dc_to_str(dc) for dc in dcr._registered.values())),
     ))
@@ -63,7 +63,7 @@ def dd_to_str(dd:type['DocumentedDatasetType']) -> str:
             f"class {dd.__name__}(Documented_Dataset):",
             indent('\n'.join((
                 dcr_to_str(dd.dims),
-                "dims:_dims_type",
+                "dims:_dims_type #type:ignore",
                 '\n'.join((
                     da_to_str(name,da,dd._ds.coords)
                     for name, da in dd._get_name_da()
