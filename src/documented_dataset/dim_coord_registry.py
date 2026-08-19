@@ -29,17 +29,20 @@ class Dim_Coord(str,Generic['DocumentedDatasetType']):
     @property
     def dim(self) -> str:
         return str(self)
-    def __call__(self,value:xr.DataArray|np.ndarray) -> Dim_Coord_Assn:
+    def __call__(self,value:xr.DataArray|np.ndarray, attrs:Attrs|None = None) -> Dim_Coord_Assn:
+        if attrs is None:
+            attrs = {}
         to_assign:xr.DataArray
         if isinstance(value,xr.DataArray):
             if "dim0" in value.dims:
                 to_assign = value.swap_dims({"dim0": self})
             else:
                 to_assign = value
+            to_assign = to_assign.assign_attrs(attrs)
         else:
             if self in self._dd._ds.coords and "dtype" in self._dd._ds.coords[self].attrs:
                 value = value.astype(self._dd._ds.coords[self].attrs["dtype"])
-            to_assign = xr.DataArray(value, dims = (self,))
+            to_assign = xr.DataArray(value, dims = (self,), attrs = attrs)
         if self in self._dd._ds.coords:
             new_values = np.concatenate([
                 self.coord.values,
