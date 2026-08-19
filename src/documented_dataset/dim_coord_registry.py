@@ -3,8 +3,8 @@ from typing import Any, Generic, Unpack
 
 import numpy as np
 import xarray as xr
-from attrs import Attrs
 
+from .attrs import Attrs
 from .types import DocumentedDatasetType
 
 
