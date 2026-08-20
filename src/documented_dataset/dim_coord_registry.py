@@ -3,6 +3,7 @@ from typing import Any, Generic, Unpack
 
 import numpy as np
 import xarray as xr
+from numpy.typing import ArrayLike
 
 from .attrs import Attrs
 from .types import DocumentedDatasetType
@@ -30,7 +31,7 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
     @property
     def dim(self) -> str:
         return str(self)
-    def __call__(self,value:xr.DataArray|np.ndarray|None = None, attrs:Attrs|None = None,**kwargs:Unpack[Attrs]) -> 'Dim_Coord_Assn|Dim_Coord':
+    def __call__(self,value:ArrayLike|None = None, attrs:Attrs|None = None,**kwargs:Unpack[Attrs]) -> 'Dim_Coord_Assn|Dim_Coord':
         if attrs is None:
             attrs = {}
         attrs = attrs | kwargs
@@ -48,12 +49,12 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
             to_assign = to_assign.assign_attrs(attrs)
         else:
             if self in self._dd._ds.coords and "dtype" in self._dd._ds.coords[self].attrs:
-                value = value.astype(self._dd._ds.coords[self].attrs["dtype"])
+                value = np.asarray(value, dtype = self._dd._ds.coords[self].attrs["dtype"])
             to_assign = xr.DataArray(value, dims = (self,), attrs = attrs)
         if self in self._dd._ds.coords:
             new_values = np.concatenate([
                 self.coord.values,
-                np.asarray(value),
+                np.asarray(value, dtype = self._dd._ds.coords[self].attrs["dtype"]),
             ])
             self._dd._ds = self._dd._ds.reindex(
                 {self: new_values},
@@ -83,7 +84,7 @@ class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
         if name not in self._registered:
             self.add_dim(name)
         return self._registered[name]
-    def array(self,data,*args:Dim_Coord|Dim_Coord_Assn, attrs:Attrs|None = None) -> xr.DataArray:
+    def array(self,data:ArrayLike,*args:Dim_Coord|Dim_Coord_Assn, attrs:Attrs|None = None) -> xr.DataArray:
         if attrs is None:
             attrs = {}
         coords = {}
