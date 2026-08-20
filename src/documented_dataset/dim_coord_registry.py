@@ -84,9 +84,10 @@ class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
         if name not in self._registered:
             self.add_dim(name)
         return self._registered[name]
-    def array(self,data:ArrayLike,*args:Dim_Coord|Dim_Coord_Assn, attrs:Attrs|None = None) -> xr.DataArray:
+    def array(self,data:ArrayLike,*args:Dim_Coord|Dim_Coord_Assn, attrs:Attrs|None = None,**kwargs:Unpack[Attrs]) -> xr.DataArray:
         if attrs is None:
             attrs = {}
+        attrs = attrs | kwargs
         coords = {}
         dims = []
         for arg in args:
