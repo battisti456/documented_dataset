@@ -3,7 +3,7 @@ from typing import Any, Generic, Unpack
 
 import numpy as np
 import xarray as xr
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, DTypeLike
 
 from .attrs import Attrs
 from .types import DocumentedDatasetType
@@ -16,7 +16,8 @@ class Dim_Coord_Assn:
 
 class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
     _dd:type[DocumentedDatasetType]
-    attrs:Attrs
+    _declared_dtype:DTypeLike|None = None
+    _declared_attrs:Attrs
     def __new__(
             cls, 
             name, 
@@ -24,7 +25,7 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
         ):
         val = str.__new__(cls, name)
         val._dd = dd
-        val.attrs = {}
+        val._declared_attrs = {}
         return val
     @property
     def coord(self) -> xr.DataArray:
@@ -32,24 +33,44 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
     @property
     def dim(self) -> str:
         return str(self)
-    def __call__(self,value:ArrayLike|None = None, attrs:Attrs|None = None,**kwargs:Unpack[Attrs]) -> 'Dim_Coord_Assn|Dim_Coord':
-        self.attrs = self.attrs | ({} if attrs is None else attrs) | kwargs
+    @property
+    def has_coord(self) -> bool:
+        return self in self._dd._ds.coords
+    def __call__(
+            self,
+            value:ArrayLike|None = None,
+            attrs:Attrs|None = None,
+            dtype:DTypeLike|None = None,
+            **kwargs:Unpack[Attrs]
+        ) -> 'Dim_Coord_Assn|Dim_Coord':
+        attrs = self.__dict__.get("_declared_attrs",{}) | ({} if attrs is None else attrs) | kwargs#type:ignore
+        assert isinstance(attrs,dict)
+        if self.has_coord:
+            self.coord.attrs.update(attrs)
+            if dtype is not None and dtype != self.coord.dtype:
+                self._dd._ds.coords[self] = self._dd._ds.coords[self].astype(dtype)
         if value is None:
+            self._declared_attrs = attrs#type:ignore
+            if dtype is not None:
+                self._declared_dtype = dtype
             return self
+        if dtype is not None:
+            pass
+        elif self in self._dd._ds.coords:
+            dtype = self._dd._ds.coords[self].dtype
+        elif hasattr(self,"_declared_dtype"):
+            dtype = self._declared_dtype
         to_assign:xr.DataArray
-        dtype = None
-        if "dtype" in self.attrs:
-            dtype = self.attrs["dtype"]
-        elif self in self._dd._ds.coords and "dtype" in self._dd._ds.coords[self].attrs:
-            dtype = self._dd._ds.coords[self].attrs["dtype"]
         if isinstance(value,xr.DataArray):
             if "dim0" in value.dims:
                 to_assign = value.swap_dims({"dim0": self})
             else:
                 to_assign = value
-            to_assign = to_assign.assign_attrs(self.attrs)
+            if dtype is not None:
+                to_assign = to_assign.astype(dtype)
+            to_assign = to_assign.assign_attrs(attrs)
         else:
-            to_assign = xr.DataArray(np.asarray(value,dtype=dtype), dims = (self,), attrs = self.attrs)
+            to_assign = xr.DataArray(np.asarray(value,dtype=dtype), dims = (self,), attrs = attrs)
         if self in self._dd._ds.coords:
             value = np.asarray(value, dtype = dtype)
             missing_coords = value[~np.isin(value,self.coord.values)]
@@ -67,8 +88,6 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
                 )
         else:
             self._dd._ds.coords.update({self:to_assign})
-        self.attrs["dtype"] = to_assign.dtype
-        to_assign.attrs["dtype"] = to_assign.dtype
         return Dim_Coord_Assn(self,to_assign)
     def __copy__(self):
         return str(self)
@@ -88,10 +107,16 @@ class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
         if name not in self._registered:
             self.add_dim(name)
         return self._registered[name]
-    def array(self,data:ArrayLike,*args:Dim_Coord|Dim_Coord_Assn, attrs:Attrs|None = None,**kwargs:Unpack[Attrs]) -> xr.DataArray:
-        if attrs is None:
-            attrs = {}
-        attrs = attrs | kwargs
+    def array(
+        self,
+        data:ArrayLike,
+        *args:Dim_Coord|Dim_Coord_Assn,
+        attrs:Attrs|None = None,
+        dtype:DTypeLike|None = None,
+        **kwargs:Unpack[Attrs]
+    ) -> xr.DataArray:
+        attrs = ({} if attrs is None else attrs) | kwargs#type:ignore
+        assert isinstance(attrs,dict)
         coords = {}
         dims = []
         for arg in args:
@@ -103,16 +128,12 @@ class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
                 dims.append(arg)
             else:
                 dims.append(arg)
-        dtype = None
-        if "dtype" in attrs:
-            dtype = attrs["dtype"]
         array = xr.DataArray(
             np.asarray(data, dtype = dtype),
             coords,
             dims,
             attrs = attrs
         )
-        array.attrs["dtype"] = array.dtype
         fill_value = attrs.get("fill_value",np.nan)
         full_coord_assignments = {
             dim:self._dd._ds.coords[dim]

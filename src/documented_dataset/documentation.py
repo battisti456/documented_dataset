@@ -1,19 +1,21 @@
 import textwrap
 
 import xarray as xr
+from numpy.typing import DTypeLike
 
-from .attrs import Attrs
 from .dim_coord_registry import Dim_Coord, Dim_Coord_Registry
 from .types import DocumentedDatasetType
 
 
 def indent(string:str) -> str:
     return textwrap.indent(string,"    ")
-def attrs_to_unit_str(attrs:Attrs) -> str:
-    return f"{attrs.get('dtype',None)}" + (
+def d_a_to_unit_str(dtype:DTypeLike|None,attrs) -> str:
+    return f"{dtype}" + (
         f" [{attrs['units']}]"
         if 'units' in attrs else ""
     )
+def da_to_unit_str(da:xr.DataArray) -> str:
+    return d_a_to_unit_str(da.dtype,da.attrs)
 def da_to_str(name:str,da:xr.DataArray,coords) -> str:
     return '\n'.join((
         f"{name}:xr.DataArray",
@@ -22,11 +24,11 @@ def da_to_str(name:str,da:xr.DataArray,coords) -> str:
             da.attrs.get('long_name',name),
             "### Dimensions",
             '\n'.join(
-                f"- {dim} : {attrs_to_unit_str(coords[dim].attrs) if dim in coords else dim}"#type:ignore
+                f"- {dim} : {da_to_unit_str(coords[dim]) if dim in coords else dim}"
                 for dim in da.dims
             ),
             "### Units",
-            attrs_to_unit_str(da.attrs),#type:ignore
+            da_to_unit_str(da),
             "### Description",
             da.attrs.get('description',"")
         ))),
@@ -34,15 +36,21 @@ def da_to_str(name:str,da:xr.DataArray,coords) -> str:
     ))
 
 def dc_to_str(dc:Dim_Coord) -> str:
+    if dc.has_coord:
+        attrs = dc.coord.attrs
+        dtype = dc.coord.dtype
+    else:
+        attrs = dc._declared_attrs
+        dtype = dc._declared_dtype
     return '\n'.join((
         f"{dc}:Dim_Coord",
         "\"\"\"",
         indent('\n'.join((
-            dc.attrs.get('long_name',dc),
+            attrs.get('long_name',dc),
             "### Units",
-            attrs_to_unit_str(dc.attrs),
+            d_a_to_unit_str(dtype,attrs),
             "### Description",
-            dc.attrs.get('description',"")
+            attrs.get('description',"")
         ))),
         "\"\"\"",
     ))
