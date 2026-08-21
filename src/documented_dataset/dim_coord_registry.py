@@ -108,9 +108,22 @@ class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
         dtype = None
         if "dtype" in attrs:
             dtype = attrs["dtype"]
-        return xr.DataArray(
+        array = xr.DataArray(
             np.asarray(data, dtype = dtype),
             coords,
             dims,
             attrs = attrs
         )
+        fill_value = attrs.get("fill_value",np.nan)
+        full_coord_assignments = {
+            dim:self._dd._ds.coords[dim]
+            for dim in array.dims
+            if dim in self._dd._ds.coords
+            and not array.get_index(dim).equals(self._dd._ds.get_index(dim))
+        }
+        if full_coord_assignments:
+            array = array.reindex(
+                full_coord_assignments,
+                fill_value=fill_value#type:ignore
+            )
+        return array
