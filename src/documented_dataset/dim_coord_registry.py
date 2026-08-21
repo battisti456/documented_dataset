@@ -67,6 +67,8 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
                 )
         else:
             self._dd._ds.coords.update({self:to_assign})
+        self.attrs["dtype"] = to_assign.dtype
+        to_assign.attrs["dtype"] = to_assign.dtype
         return Dim_Coord_Assn(self,to_assign)
     def __copy__(self):
         return str(self)

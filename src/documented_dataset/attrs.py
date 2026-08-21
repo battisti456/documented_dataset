@@ -5,7 +5,7 @@ class Attrs(TypedDict, total = False):
     units:str
     description:str
     long_name:str
-    dtype:str
+    dtype:Any
     fill_value:Any|None
 class attrs(dict):
     def __init__(self,**kwargs: Unpack[Attrs]):
