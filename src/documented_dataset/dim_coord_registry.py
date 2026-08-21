@@ -12,7 +12,7 @@ from .types import DocumentedDatasetType
 @dataclass(frozen = True)
 class Dim_Coord_Assn:
     dim_coord:'Dim_Coord'
-    data:np.ndarray
+    data:xr.DataArray
 
 class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
     _dd:type[DocumentedDatasetType]
@@ -45,7 +45,7 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
         if "dtype" in attrs:
             dtype = attrs["dtype"]
         elif self in self._dd._ds.coords and "dtype" in self._dd._ds.coords[self].attrs:
-            dtype = self._dd._ds.coords[self].attr["dtype"]
+            dtype = self._dd._ds.coords[self].attrs["dtype"]
         if isinstance(value,xr.DataArray):
             if "dim0" in value.dims:
                 to_assign = value.swap_dims({"dim0": self})
@@ -55,20 +55,23 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
         else:
             to_assign = xr.DataArray(np.asarray(value,dtype=dtype), dims = (self,), attrs = attrs)
         if self in self._dd._ds.coords:
-            new_values = np.concatenate([
-                self.coord.values,
-                np.asarray(value, dtype = dtype),
-            ])
-            self._dd._ds = self._dd._ds.reindex(
-                {self: new_values},
-                fill_value={
-                    name:da.attrs["fill_value"] for name,da in self._dd._ds.items()
-                    if "fill_value" in da.attrs
-                }
-            )
+            value = np.asarray(value, dtype = dtype)
+            missing_coords = value[~np.isin(value,self.coord.values)]
+            if len(missing_coords) > 0:
+                new_values = np.concatenate([
+                    self.coord.values,
+                    missing_coords,
+                ])
+                self._dd._ds = self._dd._ds.reindex(
+                    {self: new_values},
+                    fill_value={
+                        name:da.attrs["fill_value"] for name,da in self._dd._ds.items()
+                        if "fill_value" in da.attrs
+                    }
+                )
         else:
             self._dd._ds.coords.update({self:to_assign})
-        return Dim_Coord_Assn(self,np.asarray(value))
+        return Dim_Coord_Assn(self,to_assign)
     def __copy__(self):
         return str(self)
     def __deepcopy__(self, memo):
@@ -99,6 +102,7 @@ class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
                 dims.append(arg.dim_coord)
             elif arg in self._dd._ds.coords:
                 coords[arg] = arg.coord
+                dims.append(arg)
             else:
                 dims.append(arg)
         dtype = None
