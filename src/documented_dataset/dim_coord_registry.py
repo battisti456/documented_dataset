@@ -41,6 +41,11 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
             self._pre_declared_attrs = attrs
             return self
         to_assign:xr.DataArray
+        dtype = None
+        if "dtype" in attrs:
+            dtype = attrs["dtype"]
+        elif self in self._dd._ds.coords and "dtype" in self._dd._ds.coords[self].attrs:
+            dtype = self._dd._ds.coords[self].attr["dtype"]
         if isinstance(value,xr.DataArray):
             if "dim0" in value.dims:
                 to_assign = value.swap_dims({"dim0": self})
@@ -48,13 +53,11 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
                 to_assign = value
             to_assign = to_assign.assign_attrs(attrs)
         else:
-            if self in self._dd._ds.coords and "dtype" in self._dd._ds.coords[self].attrs:
-                value = np.asarray(value, dtype = self._dd._ds.coords[self].attrs["dtype"])
-            to_assign = xr.DataArray(value, dims = (self,), attrs = attrs)
+            to_assign = xr.DataArray(np.asarray(value,dtype=dtype), dims = (self,), attrs = attrs)
         if self in self._dd._ds.coords:
             new_values = np.concatenate([
                 self.coord.values,
-                np.asarray(value, dtype = self._dd._ds.coords[self].attrs["dtype"]),
+                np.asarray(value, dtype = dtype),
             ])
             self._dd._ds = self._dd._ds.reindex(
                 {self: new_values},
@@ -98,8 +101,11 @@ class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
                 coords[arg] = arg.coord
             else:
                 dims.append(arg)
+        dtype = None
+        if "dtype" in attrs:
+            dtype = attrs["dtype"]
         return xr.DataArray(
-            data,
+            np.asarray(data, dtype = dtype),
             coords,
             dims,
             attrs = attrs
