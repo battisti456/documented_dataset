@@ -47,9 +47,9 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
                 to_assign = value.swap_dims({"dim0": self})
             else:
                 to_assign = value
-            to_assign = to_assign.assign_attrs(attrs)
+            to_assign = to_assign.assign_attrs(self.attrs)
         else:
-            to_assign = xr.DataArray(np.asarray(value,dtype=dtype), dims = (self,), attrs = attrs)
+            to_assign = xr.DataArray(np.asarray(value,dtype=dtype), dims = (self,), attrs = self.attrs)
         if self in self._dd._ds.coords:
             value = np.asarray(value, dtype = dtype)
             missing_coords = value[~np.isin(value,self.coord.values)]
