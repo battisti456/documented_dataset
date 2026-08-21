@@ -2,10 +2,12 @@ import inspect
 from importlib import import_module
 from importlib.util import module_from_spec, spec_from_file_location
 from io import TextIOWrapper
+from itertools import chain
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Self, TypeVar
 
+import numpy as np
 import xarray as xr
 from xarray.core.coordinates import DatasetCoordinates
 
@@ -26,6 +28,15 @@ def load_module(path:Path) -> ModuleType:
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+def encode_dtype(value: object) -> str:
+    return f"numpy:{np.dtype(value).str}"#type:ignore
+
+def decode_dtype(value: str) -> np.dtype:
+    library, dtype = value.split(":", 1)
+    if library != "numpy":
+        raise TypeError(f"Unsupported dtype library: {library}")
+    return np.dtype(dtype)
 
 
 class Documented_Dataset_Meta(type):
@@ -154,7 +165,11 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
         for provider in cls._registry.providers():
             drop_vars = cls._eval_do_not_store(provider,storage_threshold)
             do_not_save += [var for var in drop_vars if var in cls._ds]
-        cls._ds.drop_vars(do_not_save).to_netcdf(path, engine="h5netcdf")
+        ds = cls._ds.drop_vars(do_not_save).copy()
+        for array in chain(ds.values(),ds.coords.values()):
+            if "dtype" in array.attrs:
+                array.attrs["dtype"] = encode_dtype(array.attrs["dtype"])
+        ds.to_netcdf(path, engine="h5netcdf")
     @classmethod
     def compile_and_save(cls,path:str|Path, storage_level = 0):
         cls.compile(storage_level)
@@ -162,6 +177,9 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     @classmethod
     def load(cls,path:str|Path):
         ds = xr.load_dataset(path)
+        for array in chain(ds.values(),ds.coords.values()):
+            if "dtype" in array.attrs:
+                array.attrs["dtype"] = decode_dtype(array.attrs["dtype"])
         cls._ds = xr.merge([ds,cls._ds])
         cls.dims.load()
     @classmethod

@@ -2,16 +2,17 @@ import textwrap
 
 import xarray as xr
 
+from .attrs import Attrs
 from .dim_coord_registry import Dim_Coord, Dim_Coord_Registry
 from .types import DocumentedDatasetType
 
 
 def indent(string:str) -> str:
     return textwrap.indent(string,"    ")
-def da_to_unit_str(da:xr.DataArray) -> str:
-    return f"{da.attrs.get('dtype',da.dtype)}" + (
-        f" [{da.attrs['units']}]"
-        if 'units' in da.attrs else ""
+def attrs_to_unit_str(attrs:Attrs) -> str:
+    return f"{attrs.get('dtype',None)}" + (
+        f" [{attrs['units']}]"
+        if 'units' in attrs else ""
     )
 def da_to_str(name:str,da:xr.DataArray,coords) -> str:
     return '\n'.join((
@@ -21,11 +22,11 @@ def da_to_str(name:str,da:xr.DataArray,coords) -> str:
             da.attrs.get('long_name',name),
             "### Dimensions",
             '\n'.join(
-                f"- {dim} : {da_to_unit_str(coords[dim]) if dim in coords else dim}"
+                f"- {dim} : {attrs_to_unit_str(coords[dim].attrs) if dim in coords else dim}"#type:ignore
                 for dim in da.dims
             ),
             "### Units",
-            da_to_unit_str(da),
+            attrs_to_unit_str(da.attrs),#type:ignore
             "### Description",
             da.attrs.get('description',"")
         ))),
@@ -37,11 +38,11 @@ def dc_to_str(dc:Dim_Coord) -> str:
         f"{dc}:Dim_Coord",
         "\"\"\"",
         indent('\n'.join((
-            dc.coord.attrs.get('long_name',dc),
+            dc.attrs.get('long_name',dc),
             "### Units",
-            da_to_unit_str(dc.coord),
+            attrs_to_unit_str(dc.attrs),
             "### Description",
-            dc.coord.attrs.get('description',"")
+            dc.attrs.get('description',"")
         ))),
         "\"\"\"",
     ))
