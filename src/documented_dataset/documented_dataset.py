@@ -130,10 +130,6 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             cls._load_providers(list(cls._registry.providers()), cls._ds, storage_threshold=storage_threshold)
         finally:
             cls._is_storing = None
-
-    @classmethod
-    def _build_documentation(cls,file:TextIOWrapper):
-        file.write(dd_to_str(cls))
     @classmethod
     def _get_name_da(cls):
         for provider in cls._registry.providers():
@@ -146,8 +142,9 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
     @classmethod
     def compile(cls, storage_level = 0):
         cls._build_dataset(storage_level)
+        doc = dd_to_str(cls)
         with open(Path(inspect.getfile(cls)).resolve().with_suffix(".pyi"),'w') as file:
-            cls._build_documentation(file)
+            file.write(doc)
     @classmethod
     def _save(cls,path:str|Path, storage_threshold = 0):
         do_not_save:list[str] = []
