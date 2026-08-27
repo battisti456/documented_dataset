@@ -42,15 +42,15 @@ def dc_to_str(dc:Dim_Coord) -> str:
     else:
         attrs = dc._declared_attrs
         dtype = dc._declared_dtype
-    attr_name = dc._attr_name()
+    attr_name = dc.values._attr_name()
     return '\n'.join((
-        f"class _dc_{dc}(Dim_Coord):",
+        f"class _{dc}_values(Protocol):",
         indent('\n'.join(
             f"{attr}: Literal[\"{name}\"]"
             for attr, name
             in attr_name.items()
         )) if attr_name else indent("..."),
-        f"{dc}:_dc_{dc}",
+        f"{dc}:Dim_Coord[Any,_{dc}_values]",
         "\"\"\"",
         indent('\n'.join((
             attrs.get('long_name',dc),
@@ -71,7 +71,7 @@ def dcr_to_str(dcr:Dim_Coord_Registry):
     
 def dd_to_str(dd:type['DocumentedDatasetType']) -> str:
     return '\n'.join((
-            "from typing import Literal",
+            "from typing import Any, Literal, Protocol",
             "",
             "import xarray as xr",
             "from documented_dataset import Dim_Coord, Dim_Coord_Registry, Documented_Dataset",

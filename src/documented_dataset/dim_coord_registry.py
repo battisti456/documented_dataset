@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Generic, Unpack
+from typing import Any, Generic, TypeVar, Unpack
 
 import numpy as np
 import xarray as xr
@@ -17,10 +17,31 @@ class Dim_Coord_Assn:
 def format_name(name:str) -> str:
     return name.lower().replace(' ','_')
 
-class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
+class Dim_Coord_Name_Access:
+    def __init__(self,dc:'Dim_Coord'):
+        self._dc = dc
+    def __getattr__(self, attr):
+        if attr in ("keys", "__getitem__", "__iter__"):
+            raise AttributeError(attr)
+        attr_name = self._attr_name()
+        if attr in attr_name:
+            return attr_name[attr]
+        raise AttributeError(attr)
+    def _attr_name(self) -> dict[str,str]:
+        if not self._dc.has_coord: return {}
+        formatted_names = {name:format_name(name) for name in self() if isinstance(name,str)}
+        return {attr:name for name, attr in formatted_names.items() if attr.isidentifier()}
+    def __call__(self) -> list[str|float|int]:
+        if not self._dc.has_coord: return []
+        return self._dc.coord.to_numpy().tolist()
+
+_DCNA = TypeVar("_DCNA")
+
+class Dim_Coord(str,Generic[DocumentedDatasetType,_DCNA]):  # noqa: UP046
     _dd:type[DocumentedDatasetType]
     _declared_dtype:DTypeLike|None = None
     _declared_attrs:Attrs
+    values:_DCNA
     def __new__(
             cls, 
             name, 
@@ -29,6 +50,7 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
         val = str.__new__(cls, name)
         val._dd = dd
         val._declared_attrs = {}
+        val.values = Dim_Coord_Name_Access(val)#type:ignore
         return val
     @property
     def coord(self) -> xr.DataArray:
@@ -96,17 +118,6 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
         return str(self)
     def __deepcopy__(self, memo):
         return str(self)
-    def __getattr__(self, attr):
-        if attr in ("keys", "__getitem__", "__iter__"):
-            raise AttributeError(attr)
-        attr_name = self._attr_name()
-        if attr in attr_name:
-            return attr_name[attr]
-        raise AttributeError(attr)
-    def _attr_name(self):
-        if not self.has_coord: return {}
-        formatted_names = {name:format_name(name) for name in self.coord.to_numpy().tolist() if isinstance(name,str)}
-        return {attr:name for name, attr in formatted_names.items() if attr.isidentifier()}
     
 
 
