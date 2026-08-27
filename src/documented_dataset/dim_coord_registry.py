@@ -97,11 +97,13 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
     def __deepcopy__(self, memo):
         return str(self)
     def __getattr__(self, attr):
-        if not self.has_coord: raise AttributeError(f"Unknown attribute '{attr}' for {self}.")
+        if attr in ("keys", "__getitem__", "__iter__"):
+            raise AttributeError(attr)
+        if not self.has_coord: raise AttributeError(attr)
         attr_name = self._attr_name()
         if attr in attr_name:
             return attr_name[attr]
-        raise AttributeError(f"Unknown attribute '{attr}' for {self}.")
+        raise AttributeError(attr)
     def _attr_name(self):
         formatted_names = {name:format_name(name) for name in self.coord.tolist() if isinstance(name,str)}
         return {attr:name for name, attr in formatted_names.items() if attr.isidentifier()}
