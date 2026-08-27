@@ -44,7 +44,7 @@ def dc_to_str(dc:Dim_Coord) -> str:
         dtype = dc._declared_dtype
     attr_name = dc.values._attr_name()
     return '\n'.join((
-        f"class _{dc}_values(Protocol):",
+        f"class _{dc}_values(Dim_Coord_Name_Access):",
         indent('\n'.join(
             f"{attr}: Literal[\"{name}\"]"
             for attr, name
@@ -71,10 +71,10 @@ def dcr_to_str(dcr:Dim_Coord_Registry):
     
 def dd_to_str(dd:type['DocumentedDatasetType']) -> str:
     return '\n'.join((
-            "from typing import Any, Literal, Protocol",
+            "from typing import Any, Literal",
             "",
             "import xarray as xr",
-            "from documented_dataset import Dim_Coord, Dim_Coord_Registry, Documented_Dataset",
+            "from documented_dataset import Dim_Coord, Dim_Coord_Name_Access, Dim_Coord_Registry, Documented_Dataset",
             "",
             f"class {dd.__name__}(Documented_Dataset):",
             indent('\n'.join((
