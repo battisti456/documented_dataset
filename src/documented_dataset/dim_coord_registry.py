@@ -105,7 +105,7 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
             return attr_name[attr]
         raise AttributeError(attr)
     def _attr_name(self):
-        formatted_names = {name:format_name(name) for name in self.coord.tolist() if isinstance(name,str)}
+        formatted_names = {name:format_name(name) for name in self.coord.to_numpy().tolist() if isinstance(name,str)}
         return {attr:name for name, attr in formatted_names.items() if attr.isidentifier()}
     
 
