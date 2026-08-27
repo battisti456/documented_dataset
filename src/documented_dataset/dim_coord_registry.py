@@ -99,12 +99,12 @@ class Dim_Coord(str,Generic[DocumentedDatasetType]):  # noqa: UP046
     def __getattr__(self, attr):
         if attr in ("keys", "__getitem__", "__iter__"):
             raise AttributeError(attr)
-        if not self.has_coord: raise AttributeError(attr)
         attr_name = self._attr_name()
         if attr in attr_name:
             return attr_name[attr]
         raise AttributeError(attr)
     def _attr_name(self):
+        if not self.has_coord: return {}
         formatted_names = {name:format_name(name) for name in self.coord.to_numpy().tolist() if isinstance(name,str)}
         return {attr:name for name, attr in formatted_names.items() if attr.isidentifier()}
     
