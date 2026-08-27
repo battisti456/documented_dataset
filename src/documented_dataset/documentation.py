@@ -45,11 +45,11 @@ def dc_to_str(dc:Dim_Coord) -> str:
     attr_name = dc._attr_name()
     return '\n'.join((
         f"class _dc_{dc}(Dim_Coord):",
-        indent('\n'.join(*(
+        indent('\n'.join(
             f"{attr}: Literal[\"{name}\"]"
             for attr, name
             in attr_name.items()
-        ))) if attr_name else indent("..."),
+        )) if attr_name else indent("..."),
         f"{dc}:_dc_{dc}",
         "\"\"\"",
         indent('\n'.join((
