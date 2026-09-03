@@ -125,7 +125,7 @@ class Documented_Dataset(metaclass = Documented_Dataset_Meta):
             cls._is_storing = storage_threshold
             for dim in cls._ds.dims:
                 assert isinstance(dim,str)
-                setattr(cls.dims,dim,dim)
+                cls.dims.add_dim(dim)
             cls._load_providers(list(cls._registry.providers()), cls._ds, storage_threshold=storage_threshold)
         finally:
             cls._is_storing = None
