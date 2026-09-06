@@ -3,6 +3,7 @@ from .dim_coord_registry import (  # noqa: F401
     Dim_Coord,
     Dim_Coord_Name_Access,
     Dim_Coord_Registry,
+    Dim_Coord_Sel_Access,
 )
 from .documented_dataset import Documented_Dataset  # noqa: F401
 from .registry import Registry  # noqa: F401
