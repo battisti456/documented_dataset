@@ -50,7 +50,13 @@ def dc_to_str(dc:Dim_Coord) -> str:
             for attr, name
             in attr_name.items()
         )) if attr_name else indent("..."),
-        f"{dc}:Dim_Coord[Any,_{dc}_values]",
+        f"class _{dc}_sel(Dim_Coord_Sel_Access):",
+        indent('\n'.join(
+            f"{attr}: dict[Literal[\"{dc}\"],Literal[\"{name}\"]]"
+            for attr, name
+            in attr_name.items()
+        )) if attr_name else indent("..."),
+        f"{dc}:Dim_Coord[Any,_{dc}_values,_{dc}_sel]",
         "\"\"\"",
         indent('\n'.join((
             attrs.get('long_name',dc),
@@ -74,7 +80,7 @@ def dd_to_str(dd:type['DocumentedDatasetType']) -> str:
             "from typing import Any, Literal",
             "",
             "import xarray as xr",
-            "from documented_dataset import Dim_Coord, Dim_Coord_Name_Access, Dim_Coord_Registry, Documented_Dataset",
+            "from documented_dataset import Dim_Coord, Dim_Coord_Name_Access, Dim_Coord_Sel_Access, Dim_Coord_Registry, Documented_Dataset",
             "",
             f"class {dd.__name__}(Documented_Dataset):",
             indent('\n'.join((

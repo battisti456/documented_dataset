@@ -35,13 +35,21 @@ class Dim_Coord_Name_Access:
         if not self._dc.has_coord: return []
         return self._dc.coord.to_numpy().tolist()
 
-_DCNA = TypeVar("_DCNA")
+class Dim_Coord_Sel_Access:
+    def __init__(self,dc:'Dim_Coord'):
+        self._dc = dc
+    def __getattr__(self, name):
+        return {self._dc:getattr(self._dc.values,name)}
 
-class Dim_Coord(str,Generic[DocumentedDatasetType,_DCNA]):  # noqa: UP046
+_DCNA = TypeVar("_DCNA", bound = 'Dim_Coord_Name_Access')
+_DCSA = TypeVar("_DCSA", bound = 'Dim_Coord_Sel_Access')
+
+class Dim_Coord(str,Generic[DocumentedDatasetType,_DCNA,_DCSA]):  # noqa: UP046
     _dd:type[DocumentedDatasetType]
     _declared_dtype:DTypeLike|None = None
     _declared_attrs:Attrs
     values:_DCNA
+    sel:_DCSA
     def __new__(
             cls, 
             name, 
@@ -51,6 +59,7 @@ class Dim_Coord(str,Generic[DocumentedDatasetType,_DCNA]):  # noqa: UP046
         val._dd = dd
         val._declared_attrs = {}
         val.values = Dim_Coord_Name_Access(val)#type:ignore
+        val.sel = Dim_Coord_Sel_Access(val)#type:ignore
         return val
     @property
     def coord(self) -> xr.DataArray:
