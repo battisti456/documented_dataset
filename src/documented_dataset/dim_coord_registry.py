@@ -170,7 +170,6 @@ class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
             dims,
             attrs = attrs
         )
-        fill_value = attrs.get("fill_value",np.nan)
         full_coord_assignments = {
             dim:self._dd._ds.coords[dim]
             for dim in array.dims
@@ -178,8 +177,12 @@ class Dim_Coord_Registry(Generic[DocumentedDatasetType]):  # noqa: UP046
             and not array.get_index(dim).equals(self._dd._ds.get_index(dim))
         }
         if full_coord_assignments:
+            kwargs = {}
+            fill_value = attrs.get("fill_value")
+            if fill_value is not None:
+                kwargs['fill_value']=fill_value
             array = array.reindex(
                 full_coord_assignments,
-                fill_value=fill_value#type:ignore
+                **kwargs#type:ignore
             )
         return array
